@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "939453696359",
+    "project_id": "tubitak-86d68",
+    "storage_bucket": "tubitak-86d68.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:939453696359:android:8f1b92eafbfdbe6e3dc7c2",
+        "android_client_info": {
+          "package_name": "com.tubitak.tubitak"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "939453696359-t8slubp5cbt20fq806ttnin30gcjrl1o.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tubitak.tubitak",
+            "certificate_hash": "dd124ab054dd4ca4b7a441c3a16a5dfced6a6eaf"
+          }
+        },
+        {
+          "client_id": "939453696359-99tm7su7sjctkrol05ti2733r06lunen.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBoF6SfhhBH2LCRNopmdBOM2FwSdwcPQ7Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "939453696359-99tm7su7sjctkrol05ti2733r06lunen.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "939453696359-8uik3d4v6a6uklm279cdfj87t45ahf1d.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.tubitak.tubitak"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
