@@ -32,7 +32,7 @@ final class ChatModel:ObservableObject {
     func send(store:AppStore,uid:String) async {
         guard !busy else{return}
         let text=draft.trimmingCharacters(in:.whitespacesAndNewlines)
-        guard !text.isEmpty,text.count<=2000 else{error="Mesaj 1–2000 karakter olmalıdır.";return}
+        guard !text.isEmpty else{return}
         if pendingText != text || pendingReplyID != replyingTo?.id {pendingID=UUID().uuidString;pendingText=text;pendingReplyID=replyingTo?.id}
         let id=pendingID ?? UUID().uuidString
         busy=true;defer{busy=false}

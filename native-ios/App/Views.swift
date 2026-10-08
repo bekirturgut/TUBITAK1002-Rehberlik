@@ -56,6 +56,7 @@ struct LoginView:View {
                     .disabled(busy || phone.isEmpty || password.isEmpty).accessibilityIdentifier("login")
                 }
                 Section { Text("Hesabınız uzman tarafından oluşturulur. Erişim sorununuz varsa proje sorumlusuna başvurunuz.").font(.footnote).foregroundStyle(.secondary) }
+                Section { NavigationLink("Sıkça sorulan sorular"){PublicFAQView()} }
             }.navigationTitle("Hoş geldiniz").scrollDismissesKeyboard(.interactively)
         }
     }
@@ -69,8 +70,8 @@ struct HomeView:View {
                 Section {
                     Text("Merhaba, \(store.profile?.name ?? "")").font(.title2.bold())
                     Text(store.profile?.role.rawValue ?? "").foregroundStyle(.secondary)
-                    ProgressView(value:Double(store.summary.percent),total:100)
-                    Text("\(store.summary.correctCount) / \(store.summary.assignedCount) doğru · %\(store.summary.percent)").font(.subheadline)
+                    ProgressView(value:Double(store.profile?.quizPercent ?? 0),total:100)
+                    Text("\(store.profile?.quizCorrectCount ?? 0) / \(store.profile?.quizAssignedCount ?? 0) doğru · %\(store.profile?.quizPercent ?? 0)").font(.subheadline)
                 }
                 Section("Birlikte öğrenelim") {
                     NavigationLink(destination:QuizView()){Label("Öğrenme kartları",systemImage:"rectangle.on.rectangle")}.accessibilityIdentifier("learning")
@@ -96,14 +97,32 @@ struct FAQView:View {
         }.navigationTitle("Sıkça sorulan sorular").searchable(text:$search,prompt:"Soru veya cevap ara")
     }
 }
+struct PublicFAQView:View {
+    @EnvironmentObject var store:AppStore
+    @State private var records:[ContentRecord]=[]
+    @State private var loading=true
+    var body:some View {
+        List {
+            if loading {ProgressView()}
+            ForEach(records){item in DisclosureGroup(item.title){Text(item.body).padding(.vertical)}}
+            if !loading && records.isEmpty {Text("Henüz içerik bulunmuyor.")}
+        }.navigationTitle("Sıkça sorulan sorular")
+        .task {
+            defer{loading=false}
+            if store.demo {records=[ContentRecord(id:"demo",collection:"sss",data:["question":"Destek nasıl alınır?","answer":"Danış ekranından uzman desteği isteyebilirsiniz."])];return}
+            do {let snap=try await store.db.collection("sss").getDocuments();records=snap.documents.map{ContentRecord(id:$0.documentID,collection:"sss",data:$0.data())}}
+            catch{store.errorMessage=error.localizedDescription}
+        }
+    }
+}
 struct BadgesView:View {
     @EnvironmentObject var store:AppStore
     var body:some View {
         List {
-            Text("Güncel başarı: %\(store.summary.percent)")
+            Text("Güncel başarı: %\(store.profile?.quizPercent ?? 0)")
             ForEach([25,50,75,100],id:\.self){level in
-                Label("%\(level) Bilgi Ustası",systemImage:store.summary.earnedBadges.contains(level) ? "medal.fill":"lock")
-                    .foregroundStyle(store.summary.earnedBadges.contains(level) ? .orange:.secondary)
+                Label("%\(level) Bilgi Ustası",systemImage:(store.profile?.earnedBadges ?? []).contains(level) ? "medal.fill":"lock")
+                    .foregroundStyle((store.profile?.earnedBadges ?? []).contains(level) ? .orange:.secondary)
             }
             Text("Kazanılan rozetler korunur. Sonuçlar mevcut projenin ilerleme kayıtlarından hesaplanır.").font(.footnote).foregroundStyle(.secondary)
         }.navigationTitle("Rozetlerim")
@@ -171,9 +190,9 @@ struct QuizView:View {
                 if completed {Label("Tur tamamlandı",systemImage:"checkmark.circle.fill").font(.title);Text("Cevaplarınız kaydedildi.")}
                 if mode==nil {
                     Text("Bilgini test et").font(.largeTitle.bold())
-                    Text("\(store.eligibleCards.count) açık kart · \(store.summary.wrongCount) yanlış")
+                    Text("\(store.eligibleCards.count) açık kart · \(store.wrongIDs.intersection(Set(store.eligibleCards.map(\.id))).count) yanlış")
                     Button("Normal sorular"){start(wrong:false)}.buttonStyle(.borderedProminent).accessibilityIdentifier("normalQuiz")
-                    Button("Yanlış sorular"){start(wrong:true)}.buttonStyle(.bordered).disabled(store.summary.wrongCount==0)
+                    Button("Yanlış sorular"){start(wrong:true)}.buttonStyle(.bordered).disabled(store.wrongIDs.intersection(Set(store.eligibleCards.map(\.id))).count==0)
                     if store.eligibleCards.isEmpty {Text("Henüz açık öğrenme kartı bulunmuyor.")}
                 } else if index<questions.count {
                     let question=questions[index]

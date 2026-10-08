@@ -196,7 +196,7 @@ struct ContentEditor:View {
                     defer{busy=false}
                     do {
                         let question=title.trimmingCharacters(in:.whitespacesAndNewlines),answer=bodyText.trimmingCharacters(in:.whitespacesAndNewlines)
-                        guard !question.isEmpty,!answer.isEmpty,question.count<=2000,answer.count<=10000 else{throw EditorError.invalid("Soru/başlık ve cevap/metin giriniz. Metin çok uzunsa kısaltınız.")}
+                        guard !question.isEmpty,!answer.isEmpty else{throw EditorError.invalid("Soru/başlık ve cevap/metin giriniz.")}
                         var data:[String:Any]
                         switch kind {
                         case .cards:data=["bilinen":question,"gercek":answer,"startWeek":week,"isActive":active,"targetGroup":role == .mother ? "mother":"upper"]

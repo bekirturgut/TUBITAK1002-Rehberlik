@@ -9,11 +9,14 @@ struct UserProfile: Identifiable {
     var createdAt: Date
     var disabled: Bool
     var earnedBadges: [Int]
+    var quizPercent: Int, quizCorrectCount: Int, quizAssignedCount: Int
     init(id: String, data: [String: Any]) throws {
         guard let role=UserRole(rawValue: data["role"] as? String ?? "") else { throw DomainError.invalidProfile }
         self.id=id; self.role=role; createdAt=(data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
         name=data["name"] as? String ?? ""; surname=data["surname"] as? String ?? ""
         phone=data["phone"] as? String ?? ""; disabled=false
+        let stats=data["quizStats"] as? [String:Any] ?? [:]
+        quizPercent=(stats["percent"] as? NSNumber)?.intValue ?? 0;quizCorrectCount=(stats["correctCount"] as? NSNumber)?.intValue ?? 0;quizAssignedCount=(stats["assignedCount"] as? NSNumber)?.intValue ?? 0
         earnedBadges=(data["quizStats"] as? [String:Any])?["earnedBadges"] as? [Int] ?? []
     }
     var fullName: String { "\(name) \(surname)".trimmingCharacters(in: .whitespaces) }
