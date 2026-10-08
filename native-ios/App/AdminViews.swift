@@ -81,13 +81,14 @@ struct UserEditor:View {
     @State private var busy=false
     @State private var creationID=UUID().uuidString
     @State private var saveError:String?
+    @State private var initialized=false
     var body:some View {
         Form {
             Section("Profil") {
-                TextField("Ad",text:$name).textContentType(.givenName)
+                TextField("Ad",text:$name).textContentType(.givenName).accessibilityIdentifier("editName")
                 TextField("Soyad",text:$surname).textContentType(.familyName)
                 TextField("Telefon",text:$phone).keyboardType(.phonePad)
-                Picker("Rol",selection:$role){ForEach(UserRole.allCases){Text($0.rawValue).tag($0)}}
+                Picker("Rol",selection:$role){ForEach(UserRole.allCases){Text($0.rawValue).tag($0)}}.accessibilityIdentifier("editRole")
                 Toggle("Hesabı devre dışı bırak",isOn:$disabled)
             }
             Section(user==nil ? "Şifre":"Şifre değiştir (isteğe bağlı)") {
@@ -111,7 +112,7 @@ struct UserEditor:View {
             if busy{ProgressView()}
         }.navigationTitle(user==nil ? "Kullanıcı ekle":"Kullanıcı düzenle")
         .toolbar{ToolbarItem(placement:.cancellationAction){Button("Vazgeç"){dismiss()}.disabled(busy)}}
-        .onAppear{if let user{name=user.name;surname=user.surname;phone=user.phone;role=user.role;disabled=user.disabled}}
+        .onAppear{guard !initialized else{return};initialized=true;if let user{name=user.name;surname=user.surname;phone=user.phone;role=user.role;disabled=user.disabled}}
         .interactiveDismissDisabled(busy)
     }
 }
@@ -179,6 +180,7 @@ struct ContentEditor:View {
     @State private var creationID=UUID().uuidString
     @State private var createdAt=Date()
     @State private var saveError:String?
+    @State private var initialized=false
     var body:some View {
         Form {
             Section(kind == .notifications ? "Başlık":"Soru") {TextField("Metin",text:$title,axis:.vertical).lineLimit(2...6)}
@@ -210,7 +212,7 @@ struct ContentEditor:View {
             if busy{ProgressView()}
         }.navigationTitle(item==nil ? "İçerik ekle":"İçerik düzenle")
         .toolbar{ToolbarItem(placement:.cancellationAction){Button("Vazgeç"){dismiss()}.disabled(busy)}}
-        .onAppear{target=role;if let item{title=item.title;bodyText=item.body;active=item.active;week=max(1,(item.data["startWeek"] as? NSNumber)?.intValue ?? 1);days=max(0,(item.data["delayDays"] as? NSNumber)?.intValue ?? 0);target=UserRole(rawValue:item.data["targetRole"] as? String ?? "") ?? role}}
+        .onAppear{guard !initialized else{return};initialized=true;target=role;if let item{title=item.title;bodyText=item.body;active=item.active;week=max(1,(item.data["startWeek"] as? NSNumber)?.intValue ?? 1);days=max(0,(item.data["delayDays"] as? NSNumber)?.intValue ?? 0);target=UserRole(rawValue:item.data["targetRole"] as? String ?? "") ?? role}}
         .interactiveDismissDisabled(busy)
     }
 }

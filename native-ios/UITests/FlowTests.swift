@@ -41,4 +41,21 @@ final class FlowTests:XCTestCase {
         XCTAssertTrue(app.staticTexts["Destek nasıl alınır?"].waitForExistence(timeout:5))
         capture(app,"AdminFAQ")
     }
+    func testAdminEditorKeepsDraftAfterRoleSelection() {
+        let app=launch()
+        XCTAssertTrue(app.segmentedControls["rolePicker"].waitForExistence(timeout:10))
+        app.segmentedControls["rolePicker"].buttons["Admin"].tap()
+        let phone=app.textFields["phone"];phone.tap();phone.typeText("05321234567")
+        let password=app.secureTextFields["password"];password.tap();password.typeText("test-password")
+        app.buttons["login"].tap()
+        XCTAssertTrue(app.buttons["user-demo"].waitForExistence(timeout:10));app.buttons["user-demo"].tap()
+        app.buttons["Kullanıcıyı düzenle"].tap()
+        let name=app.textFields["editName"];XCTAssertTrue(name.waitForExistence(timeout:5));name.tap();name.typeText(" Ek")
+        let draft=name.value as? String
+        app.buttons["editRole"].tap()
+        app.buttons["Üst Kuşak"].firstMatch.tap()
+        if !name.exists {app.navigationBars.buttons.element(boundBy:0).tap()}
+        XCTAssertEqual(name.value as? String,draft)
+        capture(app,"AdminEditor")
+    }
 }
