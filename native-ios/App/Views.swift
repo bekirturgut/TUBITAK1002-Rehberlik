@@ -105,7 +105,7 @@ struct BadgesView:View {
                 Label("%\(level) Bilgi Ustası",systemImage:store.summary.earnedBadges.contains(level) ? "medal.fill":"lock")
                     .foregroundStyle(store.summary.earnedBadges.contains(level) ? .orange:.secondary)
             }
-            Text("Kazanılan rozetler korunur. Güncel başarı yalnızca açık ve aktif kartlardan hesaplanır.").font(.footnote).foregroundStyle(.secondary)
+            Text("Kazanılan rozetler korunur. Sonuçlar mevcut projenin ilerleme kayıtlarından hesaplanır.").font(.footnote).foregroundStyle(.secondary)
         }.navigationTitle("Rozetlerim")
     }
 }
@@ -157,10 +157,7 @@ struct QuizView:View {
         Task {
             defer{busy=false}
             do {
-                let response=try await store.call("recordQuizAnswer",["cardId":question.id,"answer":option,"attemptId":attemptID,"question":question.card.question,"expectedAnswer":question.card.answer])
-                let result:Bool
-                if store.demo {result=option==question.card.answer}
-                else {guard let value=response["isCorrect"] as? Bool else {throw DomainError.invalidResponse};result=value}
+                let result=try await store.recordAnswer(question,option:option)
                 guard store.profile?.id==uid else {return}
                 selected=option; correct=result;failedOption=nil
                 if result {store.correctIDs.insert(question.id);store.wrongIDs.remove(question.id)}
@@ -198,5 +195,6 @@ struct QuizView:View {
                 }
             }.padding().frame(maxWidth:650,alignment:.leading).frame(maxWidth:.infinity)
         }.navigationTitle("Öğrenme kartları").navigationBarTitleDisplayMode(.inline)
+        .task {if !store.demo,let uid=store.profile?.id {do{try await store.refreshStats(uid:uid,assignedCount:store.eligibleCards.count)}catch{store.errorMessage=error.localizedDescription}}}
     }
 }

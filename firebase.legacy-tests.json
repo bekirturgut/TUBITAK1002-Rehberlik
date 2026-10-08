@@ -1,0 +1,5 @@
+{
+  "functions": [{"source":".legacy-emulator","codebase":"default","ignore":["node_modules",".git","*.local","test","firebase-debug.log"]}],
+  "firestore": {"rules":"functions/test/legacy-emulator.rules"},
+  "emulators": {"firestore":{"port":8080},"functions":{"port":5001},"ui":{"enabled":false},"singleProjectMode":true}
+}

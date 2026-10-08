@@ -1,6 +1,5 @@
 import SwiftUI
 import FirebaseCore
-import FirebaseAuth
 import FirebaseMessaging
 import FirebaseFirestore
 import FirebaseFunctions
@@ -46,7 +45,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-emulator-testing") {
             // Explicit debug-only integration mode; never connects test accounts to production.
-            Auth.auth().useEmulator(withHost:"127.0.0.1",port:9099)
             let settings=Firestore.firestore().settings
             settings.host="127.0.0.1:8080";settings.isSSLEnabled=false
             Firestore.firestore().settings=settings

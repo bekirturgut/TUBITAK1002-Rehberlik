@@ -20,7 +20,7 @@ final class ChatModel:ObservableObject {
         messages=[];loading=true;error=nil;replyingTo=nil;retryBotID=nil
         pendingID=nil;pendingText=nil;pendingReplyID=nil
         if store.demo {messages=[];loading=false;return}
-        listener=store.db.collection("chats").document(uid).collection("messages").order(by:"createdAt",descending:true).limit(to:300).addSnapshotListener{[weak self] snap,error in
+        listener=store.db.collection("chats").document(uid).collection("messages").order(by:"createdAt",descending:true).addSnapshotListener{[weak self] snap,error in
             Task{@MainActor in guard let self,self.generation==epoch else{return};self.loading=false
                 if let error {self.error=error.localizedDescription;return}
                 self.messages=(snap?.documents ?? []).reversed().map{ChatMessage(id:$0.documentID,data:$0.data())}
@@ -33,31 +33,53 @@ final class ChatModel:ObservableObject {
         guard !busy else{return}
         let text=draft.trimmingCharacters(in:.whitespacesAndNewlines)
         guard !text.isEmpty,text.count<=2000 else{error="Mesaj 1–2000 karakter olmalıdır.";return}
-        guard store.profile?.role != .admin || replyingTo != nil else{error="Önce cevaplayacağınız soruyu seçiniz.";return}
         if pendingText != text || pendingReplyID != replyingTo?.id {pendingID=UUID().uuidString;pendingText=text;pendingReplyID=replyingTo?.id}
         let id=pendingID ?? UUID().uuidString
         busy=true;defer{busy=false}
         do {
-            var payload:[String:Any]=["userId":uid,"messageId":id,"text":text]
-            if let reply=replyingTo {payload["replyToMessageId"]=reply.id}
-            _=try await store.call("sendNativeMessage",payload)
-            draft="";pendingID=nil;pendingText=nil;replyingTo=nil
             if store.demo {messages.append(ChatMessage(id:id,data:["text":text,"senderType":"user"]))}
-            else if store.profile?.role != .admin {await askBot(store:store,id:id)}
+            else {
+                let chat=store.db.collection("chats").document(uid)
+                try await chat.setData(["userId":uid,"createdAt":FieldValue.serverTimestamp(),"updatedAt":FieldValue.serverTimestamp()],merge:true)
+                var data:[String:Any]=["text":text,"senderType":store.profile?.role == .admin ? "admin":"user","senderRole":store.profile?.role.rawValue ?? "","senderId":uid,"createdAt":FieldValue.serverTimestamp()]
+                if store.profile?.role == .admin {data["replyToMessageId"]=replyingTo?.id ?? "";data["replyToText"]=replyingTo?.text ?? ""}
+                else {data["needsAdminReply"]=false;data["isAnswered"]=false}
+                try await chat.collection("messages").document(id).setData(data)
+                try await chat.setData(["updatedAt":FieldValue.serverTimestamp()],merge:true)
+            }
+            draft="";pendingID=nil;pendingText=nil;replyingTo=nil
+            if !store.demo && store.profile?.role != .admin {await askBot(store:store,id:id)}
         } catch{self.error=error.localizedDescription}
     }
     func askBot(store:AppStore,id:String) async {
-        do {_=try await store.call("askFaqBot",["sourceMessageId":id]);retryBotID=nil}
-        catch{retryBotID=id;self.error="Sorunuz kaydedildi, bot yanıtı alınamadı. Yeniden deneyebilir veya uzmana iletebilirsiniz."}
+        guard let uid=store.profile?.id else{return}
+        do {
+            let chat=store.db.collection("chats").document(uid)
+            let source=try await chat.collection("messages").document(id).getDocument()
+            let question=source.data()?["text"] as? String ?? ""
+            let result=try await store.call("askFaqBot",["question":question,"userId":uid,"sourceMessageId":id])
+            let needsFeedback=result["needsFeedback"] as? Bool ?? false
+            _=try await chat.collection("messages").addDocument(data:["text":result["answer"] as? String ?? "","senderType":"bot","senderId":"chatbot","createdAt":FieldValue.serverTimestamp(),"relatedQuestion":question,"sourceMessageId":id,"score":result["score"] as? Double ?? 0,"needsFeedback":needsFeedback,"showFeedbackButtons":needsFeedback,"feedbackGiven":false,"isSufficient":NSNull(),"escalated":result["escalated"] as? Bool ?? false])
+            retryBotID=nil
+        }catch{retryBotID=id;self.error="Sorunuz kaydedildi, bot yanıtı alınamadı. Yeniden deneyebilirsiniz."}
     }
     func escalate(store:AppStore,id:String) async {
-        do {_=try await store.call("escalateChatToAdmin",["sourceMessageId":id]);retryBotID=nil}
-        catch{self.error=error.localizedDescription}
+        guard let uid=store.profile?.id else{return}
+        do {
+            let source=try await store.db.collection("chats").document(uid).collection("messages").document(id).getDocument()
+            _=try await store.call("escalateChatToAdmin",["userId":uid,"sourceMessageId":id,"question":source.data()?["text"] as? String ?? "","score":0]);retryBotID=nil
+        }catch{self.error=error.localizedDescription}
     }
     func feedback(store:AppStore,message:ChatMessage,sufficient:Bool) async {
-        do {_=try await store.call("rateNativeAnswer",["messageId":message.id,"isSufficient":sufficient])}
-        catch{self.error=error.localizedDescription}
+        guard let uid=store.profile?.id else{return}
+        do {
+            let ref=store.db.collection("chats").document(uid).collection("messages").document(message.id)
+            let source=try await ref.getDocument(),data=source.data() ?? [:]
+            try await ref.updateData(["feedbackGiven":true,"isSufficient":sufficient,"showFeedbackButtons":false,"feedbackAt":FieldValue.serverTimestamp()])
+            if !sufficient {_=try await store.call("escalateChatToAdmin",["userId":uid,"question":data["relatedQuestion"] as? String ?? "","score":data["score"] as? Double ?? 0,"sourceMessageId":data["sourceMessageId"] as? String ?? ""])}
+        }catch{self.error=error.localizedDescription}
     }
+
 }
 struct ChatView:View {
     @EnvironmentObject var store:AppStore

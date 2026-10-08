@@ -67,11 +67,25 @@ public struct QuizSummary: Equatable, Sendable {
     public let earnedBadges: [Int]
     public init(cards: [LearningCard], correct: Set<String>, wrong: Set<String>, previouslyEarned: [Int] = []) {
         let valid = Set(cards.map(\.id)); assignedCount = valid.count
-        correctCount = valid.intersection(correct).count
-        wrongCount = valid.intersection(wrong.subtracting(correct)).count
-        percent = valid.isEmpty ? 0 : correctCount * 100 / valid.count
+        correctCount = correct.count
+        wrongCount = wrong.count
+        percent = LegacyPolicy.percent(correct:correctCount,assigned:assignedCount)
         let thresholds = [25, 50, 75, 100]
         let currentPercent = percent
         earnedBadges = Array(Set(previouslyEarned.filter { thresholds.contains($0) } + thresholds.filter { currentPercent >= $0 })).sorted()
+    }
+}
+
+// Mirrors LoginPage and QuizProgressService in the unchanged Flutter client.
+public enum LegacyPolicy {
+    public static func normalizePhone(_ input:String)->String {
+        var phone=input.trimmingCharacters(in:.whitespacesAndNewlines).replacingOccurrences(of:" ",with:"")
+        if phone.isEmpty || phone.hasPrefix("+"){return phone}
+        if phone.hasPrefix("0"){phone.removeFirst()}
+        if !phone.hasPrefix("90"){phone="90"+phone}
+        return "+"+phone
+    }
+    public static func percent(correct:Int,assigned:Int)->Int {
+        assigned<=0 ? 0 : min(100,max(0,Int((Double(correct)/Double(assigned)*100).rounded())))
     }
 }

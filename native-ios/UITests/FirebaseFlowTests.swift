@@ -29,7 +29,7 @@ final class FirebaseFlowTests:XCTestCase {
         app.buttons["Danış"].tap()
         let draft=chatInput(app);XCTAssertTrue(draft.waitForExistence(timeout:10));draft.tap();draft.typeText("Uzman desteği istiyorum")
         app.buttons["chatSend"].tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format:"label CONTAINS %@","Sorunuzu uzman desteğine yönlendirdim")).firstMatch.waitForExistence(timeout:60))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format:"label CONTAINS %@","Sizi uzman desteğine yönlendiriyorum")).firstMatch.waitForExistence(timeout:60))
         app.terminate();app.launch()
         authenticate(app,phone:"05321234569",role:"Admin")
         XCTAssertTrue(app.buttons["user-mother"].waitForExistence(timeout:60));app.buttons["user-mother"].tap()

@@ -1,30 +1,26 @@
-// Exercises the actual callable HTTP protocol and Auth token exchange, not .run().
+// Uses the real legacy callable HTTP protocol and Firestore emulator. No Auth or live services.
 const assert=require("node:assert/strict");
-if(process.env.GCLOUD_PROJECT!=="demo-rehberlik") throw new Error("Demo emulator required.");
-async function post(url,body,token) {
-  const response=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify(body),signal:AbortSignal.timeout(45000)});
-  const text=await response.text();let data;try{data=JSON.parse(text)}catch{throw new Error(`Emulator HTTP ${response.status}: non-JSON response`)}
-  if(!response.ok || data.error) throw new Error(`Emulator HTTP ${response.status}: ${data.error?.status || "request failed"}`);
-  return data;
+const {initializeApp}=require("firebase-admin/app"),{getFirestore,Timestamp,FieldValue}=require("firebase-admin/firestore");
+if(process.env.GCLOUD_PROJECT!=="demo-rehberlik"||!process.env.FIRESTORE_EMULATOR_HOST)throw new Error("Demo emulator required.");
+initializeApp();const db=getFirestore();let passed=0;
+async function check(name,body){await body();passed++;console.log(`PASS: ${name}`)}
+async function call(name,data){const r=await fetch(`http://127.0.0.1:5001/demo-rehberlik/europe-west1/${name}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data}),signal:AbortSignal.timeout(45000)});const body=await r.json();assert.equal(r.status,200,JSON.stringify(body));return body.result;}
+async function waitFor(read,predicate){for(let i=0;i<45;i++){const result=await read();if(predicate(result))return result;await new Promise(r=>setTimeout(r,1000))}throw new Error("Trigger did not finish");}
+async function main(){
+ await check("Unauthenticated Firestore reads used by legacy login",async()=>{
+  const r=await fetch("http://127.0.0.1:8080/v1/projects/demo-rehberlik/databases/(default)/documents/users/mother");assert.equal(r.status,200);const data=await r.json();assert.equal(data.fields.password.stringValue,"test-password");
+ });
+ await check("Three legacy roles and phone lookup remain intact",async()=>{for(const [role,phone] of [["Anne","+905321234567"],["Üst Kuşak","+905321234568"],["Admin","+905321234569"]]){const q=await db.collection("users").where("phone","==",phone).limit(1).get();assert.equal(q.size,1);assert.equal(q.docs[0].data().role,role);assert.equal(q.docs[0].data().password,"test-password")}});
+ await check("Original credential storage has no migration collections",async()=>{assert.equal((await db.collection("_credentials").get()).size,0);assert.equal((await db.collection("_phoneLogins").get()).size,0)});
+ await check("Legacy client can create login history without Auth",async()=>{const r=await fetch("http://127.0.0.1:8080/v1/projects/demo-rehberlik/databases/(default)/documents/users/mother/loginHistory?documentId=http-smoke",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({fields:{createdAt:{timestampValue:new Date().toISOString()}}})});assert.equal(r.status,200)});
+ await check("Quiz progress keeps original document IDs and fields",async()=>{const ref=db.doc("users/mother"),batch=db.batch();batch.set(ref.collection("wrongCards").doc("MotherLearnCard_c1"),{cardId:"c1",collectionName:"MotherLearnCard",question:"Örnek soru 1",answer:"Cevap 1",wrongAt:Timestamp.now(),nextReviewAt:Timestamp.fromMillis(Date.now()+86400000)});await batch.commit();assert.equal((await ref.collection("wrongCards").get()).size,1);const fix=db.batch();fix.set(ref.collection("correctCards").doc("MotherLearnCard_c1"),{cardId:"c1",collectionName:"MotherLearnCard",answer:"Cevap 1",correctAt:Timestamp.now()});fix.delete(ref.collection("wrongCards").doc("MotherLearnCard_c1"));await fix.commit();assert.equal((await ref.collection("correctCards").get()).size,1);assert.equal((await ref.collection("wrongCards").get()).size,0)});
+ await db.doc("chats/mother/messages/smoke-question").set({text:"Yardım istiyorum",senderType:"user",senderId:"mother",needsAdminReply:false,isAnswered:false,createdAt:Timestamp.now()});
+ await check("Original askFaqBot accepts question, userId, sourceMessageId without Auth",async()=>{const result=await call("askFaqBot",{question:"Yardım istiyorum",userId:"mother",sourceMessageId:"smoke-question"});assert.equal(result.escalated,true);assert.match(result.answer,/uzman desteğine/);assert.equal((await db.doc("chats/mother/messages/smoke-question").get()).data().needsAdminReply,true)});
+ await check("Original alert ID and pending chat state",async()=>{assert.equal((await db.doc("admin_alerts/mother_smoke-question").get()).data().status,"open");assert.equal((await db.doc("chats/mother").get()).data().hasPendingAdminReply,true)});
+ await check("Expert reply resolves only the referenced original question",async()=>{await db.doc("chats/mother/messages/smoke-reply").set({text:"Uzman test yanıtı",senderType:"admin",senderRole:"Admin",senderId:"mother",replyToMessageId:"smoke-question",replyToText:"Yardım istiyorum",createdAt:Timestamp.now()});await waitFor(()=>db.doc("chats/mother/messages/smoke-question").get(),s=>s.data()?.isAnswered===true);assert.equal((await db.doc("admin_alerts/mother_smoke-question").get()).data().status,"resolved");await waitFor(()=>db.doc("chats/mother").get(),s=>s.data()?.hasPendingAdminReply===false)});
+ await check("Legacy FAQ matching and answer feedback contract",async()=>{await db.doc("faq_items/smoke-faq").set({question:"Destek?",answer:"Test bilgi tabanı yanıtı",isActive:true,embedding:[1,0,0]});const result=await call("askFaqBot",{question:"Destek?",userId:"mother",sourceMessageId:"feedback-question"});assert.equal(result.escalated,false);assert.equal(result.needsFeedback,true);assert.equal(result.answer,"Test bilgi tabanı yanıtı");await db.doc("faq_items/smoke-faq").delete()});
+ await check("Original manual escalation accepts the legacy payload",async()=>{await db.doc("chats/mother/messages/feedback-question").set({text:"Destek?",senderType:"user",isAnswered:false,createdAt:Timestamp.now()});const result=await call("escalateChatToAdmin",{question:"Destek?",userId:"mother",sourceMessageId:"feedback-question",score:0.5});assert.equal((await db.doc("chats/mother/messages/feedback-question").get()).data().needsAdminReply,true)});
+ await check("FCM token remains on users and queue keeps uid_templateId IDs",async()=>{await db.doc("users/mother").update({fcmToken:"demo-fcm-token",fcmUpdatedAt:FieldValue.serverTimestamp()});await db.doc("notifications/smoke-template").set({title:"Test",body:"Test body",targetRole:"Anne",isActive:true,delayDays:30});await waitFor(()=>db.doc("sendQueue/mother_smoke-template").get(),s=>s.exists);assert.equal((await db.doc("sendQueue/mother_smoke-template").get()).data().token,"demo-fcm-token");assert.equal((await db.doc("sendQueue/template_mother_smoke-template").get()).exists,false)});
+ console.log(`${passed} legacy integration checks passed.`)
 }
-async function call(name,data,token) {return (await post(`http://127.0.0.1:5001/demo-rehberlik/europe-west1/${name}`,{data},token)).result;}
-async function login(phone,role) {
-  const result=await call("loginWithPhone",{phone,role,password:"test-password"});assert.equal(typeof result.token,"string");
-  const auth=await post("http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake-api-key",{token:result.token,returnSecureToken:true});
-  assert.equal(typeof auth.idToken,"string");return auth.idToken;
-}
-async function main() {
-  let mother;
-  for(let attempt=0;attempt<4;attempt++) {
-    try {mother=await login("05321234567","Anne");break}
-    catch(error) {if(attempt===3)throw error;await new Promise(resolve=>setTimeout(resolve,2000));}
-  }
-  const result=await call("recordQuizAnswer",{cardId:"c1",answer:"Cevap 1",attemptId:"ci-smoke-attempt"},mother);assert.equal(result.isCorrect,true);
-  await call("sendNativeMessage",{messageId:"ci-smoke-message",text:"CI smoke question"},mother);
-  await call("askFaqBot",{sourceMessageId:"ci-smoke-message"},mother);
-  const admin=await login("05321234569","Admin");
-  await call("sendNativeMessage",{userId:"mother",messageId:"ci-smoke-reply",text:"CI smoke answer",replyToMessageId:"ci-smoke-message"},admin);
-  await call("updateNativeDevice",{installationId:"ci-smoke-device"},mother);
-  console.log("Callable HTTP, Auth exchange, quiz, bot fallback, expert reply and device endpoints passed.");
-}
-main().catch(error=>{console.error(error.name+": "+error.message);process.exitCode=1});
+main().catch(e=>{console.error(e.message);process.exitCode=1});

@@ -58,13 +58,13 @@ struct UserDetailView:View {
                 NavigationLink("Sohbet ve uzman yanıtları"){ChatView(userID:user.id)}.accessibilityIdentifier("userChat")
                 NavigationLink("Giriş geçmişi"){HistoryView(userID:user.id)}
                 Button("Kullanıcıyı düzenle"){edit=true}
-                Button("Kullanıcıyı ve ilişkili verilerini sil",role:.destructive){confirmDelete=true}.disabled(busy || store.profile?.id==user.id)
+                Button("Kullanıcıyı sil",role:.destructive){confirmDelete=true}.disabled(busy || store.profile?.id==user.id)
             }
             if busy {ProgressView("Siliniyor…")}
         }.navigationTitle(latest.fullName)
         .sheet(isPresented:$edit){NavigationStack{UserEditor(user:latest)}.environmentObject(store)}
-        .confirmationDialog("Bu kullanıcının hesabı, sohbeti, ilerlemesi ve bekleyen bildirimleri silinecek. İşlem geri alınamaz.",isPresented:$confirmDelete,titleVisibility:.visible){
-            Button("Kalıcı olarak sil",role:.destructive){busy=true;Task{defer{busy=false};do{_=try await store.call("deleteNativeUser",["id":user.id]);dismiss()}catch{store.errorMessage=error.localizedDescription}}}
+        .confirmationDialog("Kullanıcı, bildirim ve giriş geçmişi silinecek. İşlem geri alınamaz.",isPresented:$confirmDelete,titleVisibility:.visible){
+            Button("Kalıcı olarak sil",role:.destructive){busy=true;Task{defer{busy=false};do{try await store.deleteUser(id:user.id);dismiss()}catch{store.errorMessage=error.localizedDescription}}}
         }
     }
 }
@@ -89,10 +89,9 @@ struct UserEditor:View {
                 TextField("Soyad",text:$surname).textContentType(.familyName)
                 TextField("Telefon",text:$phone).keyboardType(.phonePad)
                 Picker("Rol",selection:$role){ForEach(UserRole.allCases){Text($0.rawValue).tag($0)}}.accessibilityIdentifier("editRole")
-                Toggle("Hesabı devre dışı bırak",isOn:$disabled)
             }
             Section(user==nil ? "Şifre":"Şifre değiştir (isteğe bağlı)") {
-                SecureField("En az 8 karakter",text:$password).textContentType(.newPassword)
+                SecureField("Şifre",text:$password).textContentType(.newPassword)
                 Text("Mevcut şifre görüntülenmez. Boş bırakırsanız değişmez.").font(.caption).foregroundStyle(.secondary)
             }
             if let saveError {Section{Text(saveError).foregroundStyle(.red)}}
@@ -100,12 +99,12 @@ struct UserEditor:View {
                 busy=true;Task {
                     defer{busy=false}
                     do {
-                        let normalized=try PhoneNumber.normalize(phone)
+                        let normalized=LegacyPolicy.normalizePhone(phone)
                         guard !name.trimmingCharacters(in:.whitespaces).isEmpty,!surname.trimmingCharacters(in:.whitespaces).isEmpty else {throw EditorError.invalid("Ad ve soyad giriniz.")}
-                        guard user != nil || password.count>=8 else {throw EditorError.invalid("Yeni kullanıcı için en az 8 karakterli şifre gerekiyor.")}
-                        var data:[String:Any]=["name":name,"surname":surname,"phone":normalized,"role":role.rawValue,"disabled":disabled]
-                        data["id"]=user?.id ?? creationID;if !password.isEmpty{data["password"]=password}
-                        _=try await store.call("saveNativeUser",data);password="";dismiss()
+                        var data:[String:Any]=["name":name,"surname":surname,"phone":normalized,"role":role.rawValue]
+                        let trimmed=password.trimmingCharacters(in:.whitespacesAndNewlines)
+                        if !trimmed.isEmpty{data["password"]=trimmed}
+                        try await store.saveUser(id:user?.id,creationID:creationID,data:data);password="";dismiss()
                     } catch{saveError=error.localizedDescription}
                 }
             }.disabled(busy)
@@ -185,7 +184,7 @@ struct ContentEditor:View {
         Form {
             Section(kind == .notifications ? "Başlık":"Soru") {TextField("Metin",text:$title,axis:.vertical).lineLimit(2...6)}
             Section(kind == .notifications ? "Bildirim metni":"Cevap") {TextEditor(text:$bodyText).frame(minHeight:150)}
-            if kind == .cards {Section{Stepper("Başlangıç haftası: \(week)",value:$week,in:1...520)}}
+            if kind == .cards {Section{Stepper("Başlangıç haftası: \(week)",value:$week,in:0...520)}}
             if kind == .notifications {
                 Section{Picker("Hedef rol",selection:$target){ForEach(UserRole.allCases){Text($0.rawValue).tag($0)}};Stepper("Kayıttan sonra gün: \(days)",value:$days,in:0...3650)}
             }

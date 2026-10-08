@@ -28,22 +28,32 @@ final class DomainTests: XCTestCase {
         var random=SystemRandomNumberGenerator()
         XCTAssertThrowsError(try LearningPolicy.questions((1...4).map { LearningCard(id:"\($0)",question:"S",answer:"same") },using:&random))
     }
-    func testLegacyWhitespaceIsNormalizedLikeServerGrading() {
+    func testLegacyWhitespaceMatchesFlutter() {
         let card=LearningCard(id:"legacy",question:" Soru \n",answer:" Cevap \n")
         XCTAssertEqual(card.question,"Soru");XCTAssertEqual(card.answer,"Cevap")
         var random=SystemRandomNumberGenerator()
         let cards=["same"," same","same ","\nsame"].enumerated().map {LearningCard(id:String($0.offset),question:"Q",answer:$0.element)}
         XCTAssertThrowsError(try LearningPolicy.questions(cards,using:&random))
     }
-    func testStatsExcludeDeletedCardsAndFloorThresholds() {
+    func testStatsPreserveLegacyCountsAndRoundThresholds() {
         let cards=(1...201).map { LearningCard(id:"\($0)",question:"S",answer:"C") }
         let summary=QuizSummary(cards:cards,correct:Set((1...50).map(String.init)+["deleted"]),wrong:["1","51","deleted"])
-        XCTAssertEqual(summary.correctCount,50); XCTAssertEqual(summary.wrongCount,1)
-        XCTAssertEqual(summary.percent,24); XCTAssertEqual(summary.earnedBadges,[])
+        XCTAssertEqual(summary.correctCount,51); XCTAssertEqual(summary.wrongCount,3)
+        XCTAssertEqual(summary.percent,25); XCTAssertEqual(summary.earnedBadges,[25])
     }
     func testEarnedBadgesPersistAndEmptyStatsAreSafe() {
         let summary=QuizSummary(cards:[],correct:["deleted"],wrong:[],previouslyEarned:[50,25,999])
         XCTAssertEqual(summary.percent,0); XCTAssertEqual(summary.earnedBadges,[25,50])
     }
     func testAdminHasNoLearningCollection() { XCTAssertNil(UserRole.admin.cardCollection) }
+    func testLegacyPhoneNormalizationMatchesFlutter() {
+        for input in ["0532 123 45 67","5321234567","905321234567","+905321234567"] {XCTAssertEqual(LegacyPolicy.normalizePhone(input),"+905321234567")}
+        XCTAssertEqual(LegacyPolicy.normalizePhone(""),"")
+        XCTAssertEqual(LegacyPolicy.normalizePhone("+123"),"+123")
+    }
+    func testLegacyPercentRoundingAndClamping() {
+        XCTAssertEqual(LegacyPolicy.percent(correct:2,assigned:3),67)
+        XCTAssertEqual(LegacyPolicy.percent(correct:4,assigned:3),100)
+        XCTAssertEqual(LegacyPolicy.percent(correct:4,assigned:0),0)
+    }
 }

@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -23,19 +25,21 @@ jobs:
           cache-dependency-path: functions/package-lock.json
       - run: npm ci
         working-directory: functions
-      - run: npm test
-        working-directory: functions
+      - run: node --test functions/test/legacy-contract.test.js
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-      - name: Firestore authorization and callable integration tests
-        run: npx --yes firebase-tools@15.30.0 emulators:exec --only firestore,auth --project demo-rehberlik 'npm --prefix functions run test:integration'
+      - run: node functions/scripts/prepare-emulator.js
+      - name: Legacy data flow integration tests
+        run: npx --yes firebase-tools@15.30.0 emulators:exec --config firebase.legacy-tests.json --only firestore,functions --project demo-rehberlik 'GCLOUD_PROJECT=demo-rehberlik FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node functions/scripts/seed-emulator.js --reset && GCLOUD_PROJECT=demo-rehberlik FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node functions/scripts/check-emulator.js'
   swift-ios:
     runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Xcode version
         run: xcodebuild -version
       - name: Core tests
@@ -52,14 +56,14 @@ jobs:
       - name: Start isolated Firebase services for native end-to-end tests
         run: |
           npm ci --prefix functions
-          printf 'GEMINI_API_KEY=emulator-only\n' > functions/.secret.local
-          FUNCTIONS_DISCOVERY_TIMEOUT=120 npx --yes firebase-tools@15.30.0 emulators:start --only firestore,auth,functions --project demo-rehberlik > native-ios/emulator.log 2>&1 &
+          node functions/scripts/prepare-emulator.js
+          FUNCTIONS_DISCOVERY_TIMEOUT=120 npx --yes firebase-tools@15.30.0 emulators:start --config firebase.legacy-tests.json --only firestore,functions --project demo-rehberlik > native-ios/emulator.log 2>&1 &
           for i in $(seq 1 90); do
-            if curl -fsS http://127.0.0.1:4400/emulators | python3 -c 'import json,sys; d=json.load(sys.stdin); assert all(k in d for k in ["firestore","auth","functions"])' 2>/dev/null; then break; fi
+            if curl -fsS http://127.0.0.1:4400/emulators | python3 -c 'import json,sys; d=json.load(sys.stdin); assert all(k in d for k in ["firestore","functions"])' 2>/dev/null; then break; fi
             sleep 2
           done
           GCLOUD_PROJECT=demo-rehberlik FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node functions/scripts/seed-emulator.js
-          GCLOUD_PROJECT=demo-rehberlik node functions/scripts/check-emulator.js
+          GCLOUD_PROJECT=demo-rehberlik FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node functions/scripts/check-emulator.js
           GCLOUD_PROJECT=demo-rehberlik FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node functions/scripts/seed-emulator.js --reset
       - name: Generate native project
         run: |

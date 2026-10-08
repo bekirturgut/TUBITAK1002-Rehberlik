@@ -37,8 +37,6 @@ targets:
           NSAllowsLocalNetworking: true
     dependencies:
       - package: Firebase
-        product: FirebaseAuth
-      - package: Firebase
         product: FirebaseFirestore
       - package: Firebase
         product: FirebaseFunctions
