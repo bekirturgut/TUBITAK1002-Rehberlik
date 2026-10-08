@@ -280,14 +280,14 @@ async function enqueuePush(id,uid,payload) {
 exports.nativeFaqEmbedding = onDocumentWritten({document:"faq_items/{id}",secrets:[geminiKey]},async event=>{
   const after=event.data.after; if(!after.exists) return; const data=after.data();
   if(data.question===event.data.before.data()?.question) return;
-  const question=String(data.question || "").trim(); if(!question) return;
+  const rawQuestion=data.question; const question=String(rawQuestion || "").trim(); if(!question) return;
   try {
     const result=await ai().models.embedContent({model:"gemini-embedding-001",contents:question,config:{outputDimensionality:768}});
-    await db.runTransaction(async tx=>{const latest=await tx.get(after.ref); if(latest.data()?.question!==question) return;
-      tx.update(after.ref,{embedding:result.embeddings[0].values,embeddingQuestion:question,embeddingDim:result.embeddings[0].values.length,embeddingModel:"gemini-embedding-001",embeddingError:FieldValue.delete()});});
+    await db.runTransaction(async tx=>{const latest=await tx.get(after.ref); if(latest.data()?.question!==rawQuestion) return;
+      tx.update(after.ref,{embedding:result.embeddings[0].values,embeddingQuestion:rawQuestion,embeddingDim:result.embeddings[0].values.length,embeddingModel:"gemini-embedding-001",embeddingError:FieldValue.delete()});});
   } catch(e) {
     console.error("Embedding failed",e.name);
-    await db.runTransaction(async tx=>{const latest=await tx.get(after.ref);if(latest.data()?.question!==question)return;
+    await db.runTransaction(async tx=>{const latest=await tx.get(after.ref);if(latest.data()?.question!==rawQuestion)return;
       tx.update(after.ref,{embedding:FieldValue.delete(),embeddingError:"Eşleştirme verisi oluşturulamadı. Yeniden denemek için soruyu güncelleyiniz."});});
   }
 });

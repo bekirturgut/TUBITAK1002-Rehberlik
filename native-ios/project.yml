@@ -28,6 +28,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tubitak.tubitak
         CODE_SIGN_ENTITLEMENTS: App/Rehberlik.entitlements
+        'CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]': App/Simulator.entitlements
         INFOPLIST_KEY_UIBackgroundModes: [remote-notification]
     info:
       path: App/Info.plist

@@ -6,10 +6,10 @@ async function main() {
   if(!process.env.GEMINI_API_KEY)throw new Error("Provide the rotated key through the operator environment.");
   const ai=new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY});
   for(const row of rows.docs) {
-    const question=String(row.data().question || "").trim();if(!question)continue;
+    const rawQuestion=row.data().question; const question=String(rawQuestion || "").trim();if(!question)continue;
     const result=await ai.models.embedContent({model:"gemini-embedding-001",contents:question,config:{outputDimensionality:768}});
-    await db.runTransaction(async tx=>{const fresh=await tx.get(row.ref);if(fresh.data()?.question!==question)return;
-      tx.update(row.ref,{embedding:result.embeddings[0].values,embeddingQuestion:question,embeddingDim:result.embeddings[0].values.length,embeddingModel:"gemini-embedding-001",embeddingError:FieldValue.delete()});});
+    await db.runTransaction(async tx=>{const fresh=await tx.get(row.ref);if(fresh.data()?.question!==rawQuestion)return;
+      tx.update(row.ref,{embedding:result.embeddings[0].values,embeddingQuestion:rawQuestion,embeddingDim:result.embeddings[0].values.length,embeddingModel:"gemini-embedding-001",embeddingError:FieldValue.delete()});});
   }
   console.log("Backfill complete.");
 }

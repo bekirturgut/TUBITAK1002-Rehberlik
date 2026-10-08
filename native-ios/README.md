@@ -10,7 +10,7 @@ Requires macOS, Xcode 16.4+ and XcodeGen. iOS deployment target: 16. Firebase Ap
 swift test --package-path Core
 brew install xcodegen
 xcodegen generate
-xcodebuild test -project Rehberlik.xcodeproj -scheme Rehberlik -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO
+xcodebuild test -project Rehberlik.xcodeproj -scheme Rehberlik -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO
 xcodebuild build -project Rehberlik.xcodeproj -scheme Rehberlik -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
 ```
 

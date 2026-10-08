@@ -5,6 +5,7 @@ const {initializeTestEnvironment,assertSucceeds,assertFails}=require("@firebase/
 const {doc,getDoc,setDoc,updateDoc,collection,getDocs,query,where}=require("firebase/firestore");
 if(!process.env.FIRESTORE_EMULATOR_HOST) throw new Error("Integration tests require emulator; live execution refused.");
 process.env.GCLOUD_PROJECT="demo-rehberlik";
+process.env.FUNCTIONS_EMULATOR="true";
 process.env.GEMINI_API_KEY=""; // No live AI calls in integration tests.
 const api=require("../native-api");
 const {getFirestore,Timestamp}=require("firebase-admin/firestore");const {getApp,deleteApp}=require("firebase-admin/app");
@@ -190,4 +191,25 @@ test("credential migration dry run is read-only and apply preserves IDs and shor
   assert.equal((await db.doc("users/mother").get()).data().password,undefined);
   assert.equal((await db.doc("users/mother/wrongCards/keep").get()).exists,true);
   assert.equal(await D.verifyPassword("old",(await db.doc("_credentials/mother").get()).data()),true);
+});
+
+test("notification migration is read-only by default and preserves delivery success on collisions",async()=>{
+  const {promisify}=require("node:util"),{execFile}=require("node:child_process");
+  await db.doc("sendQueue/legacy1").set({uid:"mother",templateId:"t1",sent:true,token:"old-token",dueAt:Timestamp.now()});
+  await db.doc("sendQueue/legacy2").set({uid:"mother",templateId:"t2",sent:false,token:"old-token",dueAt:Timestamp.now()});
+  await db.doc("sendQueue/template_mother_t2").set({uid:"mother",templateId:"t2",sent:true});
+  const options={env:process.env,timeout:60000};
+  await promisify(execFile)(process.execPath,["scripts/migrate-notifications.js"],options);
+  assert.equal((await db.doc("sendQueue/legacy1").get()).exists,true);
+  await promisify(execFile)(process.execPath,["scripts/migrate-notifications.js","--apply"],options);
+  for(const id of ["t1","t2"]) {const data=(await db.doc(`sendQueue/template_mother_${id}`).get()).data();assert.equal(data.sent,true);assert.equal(data.token,undefined);}
+  assert.equal((await db.doc("sendQueue/legacy1").get()).exists,false);
+});
+
+test("embedding failure removes stale vectors even from legacy whitespace questions",async()=>{
+  const ref=db.doc("faq_items/legacy-spaces"),before=await ref.get();
+  await ref.set({question:" Legacy question ",answer:"Answer",isActive:true,embedding:[1,2,3]});
+  await api.nativeFaqEmbedding.run({data:{before,after:await ref.get()},params:{id:ref.id}});
+  const data=(await ref.get()).data();
+  assert.equal(data.embedding,undefined);assert.equal(typeof data.embeddingError,"string");
 });

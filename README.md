@@ -34,7 +34,7 @@ swift test --package-path native-ios/Core
 brew install xcodegen
 cd native-ios
 xcodegen generate
-xcodebuild test -project Rehberlik.xcodeproj -scheme Rehberlik -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO
+xcodebuild test -project Rehberlik.xcodeproj -scheme Rehberlik -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO
 ```
 
 ## Canlıya geçiş
