@@ -26,7 +26,6 @@ struct UsersView:View {
                     ForEach(store.users.filter{$0.role==role && (search.isEmpty || $0.fullName.localizedCaseInsensitiveContains(search) || $0.phone.contains(search))}){user in
                         NavigationLink(destination:UserDetailView(user:user)) {
                             VStack(alignment:.leading){Text(user.fullName);Text(user.phone).font(.caption).foregroundStyle(.secondary)
-                                if user.disabled {Text("Hesap kapalı").font(.caption).foregroundStyle(.red)}
                                 let pending=store.chats.first{$0.id==user.id}?.pendingCount ?? 0
                                 if pending>0 {Text("\(pending) yanıt bekleyen soru").font(.caption.bold()).foregroundStyle(.orange)}
                             }
@@ -58,7 +57,7 @@ struct UserDetailView:View {
                 NavigationLink("Sohbet ve uzman yanıtları"){ChatView(userID:user.id)}.accessibilityIdentifier("userChat")
                 NavigationLink("Giriş geçmişi"){HistoryView(userID:user.id)}
                 Button("Kullanıcıyı düzenle"){edit=true}
-                Button("Kullanıcıyı sil",role:.destructive){confirmDelete=true}.disabled(busy || store.profile?.id==user.id)
+                Button("Kullanıcıyı sil",role:.destructive){confirmDelete=true}.disabled(busy)
             }
             if busy {ProgressView("Siliniyor…")}
         }.navigationTitle(latest.fullName)
@@ -77,7 +76,6 @@ struct UserEditor:View {
     @State private var phone=""
     @State private var password=""
     @State private var role:UserRole = .mother
-    @State private var disabled=false
     @State private var busy=false
     @State private var creationID=UUID().uuidString
     @State private var saveError:String?
@@ -100,8 +98,7 @@ struct UserEditor:View {
                     defer{busy=false}
                     do {
                         let normalized=LegacyPolicy.normalizePhone(phone)
-                        guard !name.trimmingCharacters(in:.whitespaces).isEmpty,!surname.trimmingCharacters(in:.whitespaces).isEmpty else {throw EditorError.invalid("Ad ve soyad giriniz.")}
-                        var data:[String:Any]=["name":name,"surname":surname,"phone":normalized,"role":role.rawValue]
+                        var data:[String:Any]=["name":name.trimmingCharacters(in:.whitespacesAndNewlines),"surname":surname.trimmingCharacters(in:.whitespacesAndNewlines),"phone":normalized,"role":role.rawValue]
                         let trimmed=password.trimmingCharacters(in:.whitespacesAndNewlines)
                         if !trimmed.isEmpty{data["password"]=trimmed}
                         try await store.saveUser(id:user?.id,creationID:creationID,data:data);password="";dismiss()
@@ -111,7 +108,7 @@ struct UserEditor:View {
             if busy{ProgressView()}
         }.navigationTitle(user==nil ? "Kullanıcı ekle":"Kullanıcı düzenle")
         .toolbar{ToolbarItem(placement:.cancellationAction){Button("Vazgeç"){dismiss()}.disabled(busy)}}
-        .onAppear{guard !initialized else{return};initialized=true;if let user{name=user.name;surname=user.surname;phone=user.phone;role=user.role;disabled=user.disabled}}
+        .onAppear{guard !initialized else{return};initialized=true;if let user{name=user.name;surname=user.surname;phone=user.phone;role=user.role}}
         .interactiveDismissDisabled(busy)
     }
 }
@@ -184,9 +181,9 @@ struct ContentEditor:View {
         Form {
             Section(kind == .notifications ? "Başlık":"Soru") {TextField("Metin",text:$title,axis:.vertical).lineLimit(2...6)}
             Section(kind == .notifications ? "Bildirim metni":"Cevap") {TextEditor(text:$bodyText).frame(minHeight:150)}
-            if kind == .cards {Section{Stepper("Başlangıç haftası: \(week)",value:$week,in:0...520)}}
+            if kind == .cards {Section{Stepper("Başlangıç haftası: \(week)",onIncrement:{week+=1},onDecrement:{week=max(0,week-1)})}}
             if kind == .notifications {
-                Section{Picker("Hedef rol",selection:$target){ForEach(UserRole.allCases){Text($0.rawValue).tag($0)}};Stepper("Kayıttan sonra gün: \(days)",value:$days,in:0...3650)}
+                Section{Picker("Hedef rol",selection:$target){ForEach(UserRole.allCases){Text($0.rawValue).tag($0)}};Stepper("Kayıttan sonra gün: \(days)",onIncrement:{days+=1},onDecrement:{days=max(0,days-1)})}
             }
             if kind != .faq {Toggle("Aktif",isOn:$active)}
             if kind == .bot,let issue=item?.data["embeddingError"] as? String {Section("Eşleştirme durumu"){Text(issue).foregroundStyle(.red)}}
@@ -211,7 +208,7 @@ struct ContentEditor:View {
             if busy{ProgressView()}
         }.navigationTitle(item==nil ? "İçerik ekle":"İçerik düzenle")
         .toolbar{ToolbarItem(placement:.cancellationAction){Button("Vazgeç"){dismiss()}.disabled(busy)}}
-        .onAppear{guard !initialized else{return};initialized=true;target=role;if let item{title=item.title;bodyText=item.body;active=item.active;week=max(1,(item.data["startWeek"] as? NSNumber)?.intValue ?? 1);days=max(0,(item.data["delayDays"] as? NSNumber)?.intValue ?? 0);target=UserRole(rawValue:item.data["targetRole"] as? String ?? "") ?? role}}
+        .onAppear{guard !initialized else{return};initialized=true;target=role;if let item{title=item.title;bodyText=item.body;active=item.active;week=max(0,(item.data["startWeek"] as? NSNumber)?.intValue ?? 1);days=max(0,(item.data["delayDays"] as? NSNumber)?.intValue ?? 0);target=UserRole(rawValue:item.data["targetRole"] as? String ?? "") ?? role}}
         .interactiveDismissDisabled(busy)
     }
 }
