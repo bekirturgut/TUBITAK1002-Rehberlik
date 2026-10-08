@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function active() {
+      return request.auth != null && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('disabled', false) == false
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('deleting', false) == false;
+    }
+    function admin() { return active() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin'; }
+    function owner(uid) { return active() && request.auth.uid == uid; }
+    function validText(value, max) { return value is string && value.size() > 0 && value.size() <= max; }
+    function validContent(col) {
+      let d = request.resource.data;
+      return (col == 'sss' && d.keys().hasOnly(['question','answer','createdAt','updatedAt']) && validText(d.question,2000) && validText(d.answer,10000))
+        || (col == 'faq_items' && d.keys().hasOnly(['question','answer','isActive','createdAt','updatedAt','embedding','embeddingDim','embeddingModel','embeddingError']) && validText(d.question,2000) && validText(d.answer,10000) && d.isActive is bool && !request.resource.data.diff(resource == null ? {} : resource.data).affectedKeys().hasAny(['embedding','embeddingDim','embeddingModel','embeddingError']))
+        || ((col == 'MotherLearnCard' || col == 'UpperLearnCard') && d.keys().hasOnly(['bilinen','gercek','startWeek','isActive','targetGroup','createdAt','updatedAt']) && validText(d.bilinen,2000) && validText(d.gercek,10000) && d.startWeek is int && d.startWeek >= 1 && d.startWeek <= 520 && d.isActive is bool && d.targetGroup == (col == 'MotherLearnCard' ? 'mother' : 'upper'))
+        || (col == 'notifications' && d.keys().hasOnly(['title','body','targetRole','delayDays','isActive','createdAt','updatedAt']) && validText(d.title,2000) && validText(d.body,10000) && d.targetRole in ['Anne','Üst Kuşak','Admin'] && d.delayDays is int && d.delayDays >= 0 && d.delayDays <= 3650 && d.isActive is bool);
+    }
+    match /users/{uid} {
+      allow read: if owner(uid) || admin();
+      allow write: if false;
+      match /{sub}/{id} {
+        allow read: if (owner(uid) || admin()) && sub in ['correctCards','wrongCards','loginHistory','quizAttempts'];
+        allow write: if false;
+      }
+    }
+    match /sss/{id} { allow read: if active(); }
+    match /faq_items/{id} { allow read: if admin(); }
+    match /MotherLearnCard/{id} { allow read: if admin() || (active() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Anne'); }
+    match /UpperLearnCard/{id} { allow read: if admin() || (active() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Üst Kuşak'); }
+    match /notifications/{id} {
+      allow read: if admin() || (active() && resource.data.isActive == true && resource.data.targetRole == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role);
+    }
+    match /{col}/{id} {
+      allow create, update: if admin() && col in ['sss','faq_items','MotherLearnCard','UpperLearnCard','notifications'] && validContent(col);
+      allow delete: if admin() && col in ['sss','faq_items','MotherLearnCard','UpperLearnCard','notifications'];
+    }
+    match /chats/{uid} {
+      allow read: if owner(uid) || admin();
+      allow write: if false;
+      match /messages/{id} { allow read: if owner(uid) || admin(); allow write: if false; }
+    }
+    match /admin_alerts/{id} { allow read: if admin(); allow write: if false; }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

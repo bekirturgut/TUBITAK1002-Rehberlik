@@ -1,4 +1,12 @@
 # Miscellaneous
+.env
+.env.*
+!.env.example
+**/.build/
+**/DerivedData/
+native-ios/Rehberlik.xcodeproj/
+**/*.xcresult/
+**/Package.resolved
 *.class
 *.log
 *.pyc

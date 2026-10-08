@@ -1,0 +1,52 @@
+name: Native Swift iOS
+on:
+  push:
+    branches: ['migration/**']
+  pull_request:
+    paths: ['native-ios/**', 'functions/**', 'firestore*', '.github/workflows/native-ios.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-ios-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - run: npm ci
+        working-directory: functions
+      - run: npm test
+        working-directory: functions
+  swift-ios:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: Core tests
+        run: swift test --package-path native-ios/Core
+      - name: Generate native project
+        run: |
+          brew install xcodegen
+          cd native-ios
+          xcodegen generate
+      - name: iOS simulator build and tests
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for k,vs in d["devices"].items() if "iOS" in k for v in vs if "iPhone" in v["name"]))')
+          xcodebuild test -project native-ios/Rehberlik.xcodeproj -scheme Rehberlik -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath native-ios/TestResults.xcresult CODE_SIGNING_ALLOWED=NO
+      - name: Unsigned device build
+        run: xcodebuild build -project native-ios/Rehberlik.xcodeproj -scheme Rehberlik -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-ios-test-results
+          path: native-ios/TestResults.xcresult

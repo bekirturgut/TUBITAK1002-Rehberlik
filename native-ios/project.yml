@@ -1,0 +1,60 @@
+name: Rehberlik
+options:
+  bundleIdPrefix: com.tubitak
+  deploymentTarget:
+    iOS: '16.0'
+packages:
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk.git
+    exactVersion: 12.0.0
+  RehberlikCore:
+    path: Core
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    TARGETED_DEVICE_FAMILY: '1,2'
+    MARKETING_VERSION: '2.0.0'
+    CURRENT_PROJECT_VERSION: '1'
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_CFBundleDisplayName: Rehberlik
+    INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+targets:
+  Rehberlik:
+    type: application
+    platform: iOS
+    sources: [App]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tubitak.tubitak
+        CODE_SIGN_ENTITLEMENTS: App/Rehberlik.entitlements
+        INFOPLIST_KEY_UIBackgroundModes: [remote-notification]
+    dependencies:
+      - package: Firebase
+        product: FirebaseAuth
+      - package: Firebase
+        product: FirebaseFirestore
+      - package: Firebase
+        product: FirebaseFunctions
+      - package: Firebase
+        product: FirebaseMessaging
+      - package: RehberlikCore
+  RehberlikTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: Rehberlik
+  RehberlikUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: Rehberlik
+schemes:
+  Rehberlik:
+    build:
+      targets:
+        Rehberlik: all
+    test:
+      targets: [RehberlikTests, RehberlikUITests]
