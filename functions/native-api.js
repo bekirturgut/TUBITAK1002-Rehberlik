@@ -223,7 +223,8 @@ exports.nativeUserMessageBot = onDocumentCreated({document:"chats/{uid}/messages
   if(!data || data.senderType!=="user") return;
   const profile=await db.doc(`users/${event.params.uid}`).get();
   if(!profile.exists || profile.data().disabled || profile.data().deleting) return;
-  await processQuestion(event.params.uid,event.params.id);
+  try {await processQuestion(event.params.uid,event.params.id);}
+  catch(error) {if(!["permission-denied","not-found"].includes(error.code))throw error;}
 });
 exports.nativeExpertReply = onDocumentCreated({document:"chats/{uid}/messages/{id}",retry:true},async event=>{
   if(event.data?.data().senderType!=="admin") return;
@@ -301,7 +302,8 @@ exports.sendDueNotifications = onSchedule({schedule:"every 1 minutes",timeZone:"
   const abandoned=await db.collection("_botJobs").where("leaseUntil","<=",Date.now()).limit(20).get();
   for(const job of abandoned.docs) {
     const profile=await db.doc(`users/${job.data().uid}`).get();
-    if(!profile.exists || profile.data().disabled || profile.data().deleting) {await job.ref.delete();continue;}
+    const source=await db.doc(`chats/${job.data().uid}/messages/${job.data().messageID}`).get();
+    if(!profile.exists || profile.data().disabled || profile.data().deleting || !source.exists) {await job.ref.delete();continue;}
     await processQuestion(job.data().uid,job.data().messageID);
   }
   for(const template of templates.docs) {

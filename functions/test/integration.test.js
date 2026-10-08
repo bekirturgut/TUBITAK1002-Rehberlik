@@ -213,3 +213,14 @@ test("embedding failure removes stale vectors even from legacy whitespace questi
   const data=(await ref.get()).data();
   assert.equal(data.embedding,undefined);assert.equal(typeof data.embeddingError,"string");
 });
+
+test("deleted questions do not cause infinite trigger retries or block scheduled deliveries",async()=>{
+  await run("sendNativeMessage","mother",{messageId:"deleted-question",text:"Q"});
+  const source=await db.doc("chats/mother/messages/deleted-question").get();await source.ref.delete();
+  await api.nativeUserMessageBot.run({params:{uid:"mother",id:source.id},data:source});
+  await db.doc("_botJobs/orphan").set({uid:"mother",messageID:source.id,leaseUntil:0});
+  await db.doc("notifications/template").set({targetRole:"Anne",title:"T",body:"B",delayDays:0,isActive:true});
+  await api.sendDueNotifications.run({});
+  assert.equal((await db.doc("_botJobs/orphan").get()).exists,false);
+  assert.equal((await db.doc("sendQueue/template_mother_template").get()).exists,true);
+});
