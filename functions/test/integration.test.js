@@ -5,6 +5,7 @@ const {initializeTestEnvironment,assertSucceeds,assertFails}=require("@firebase/
 const {doc,getDoc,setDoc,updateDoc,collection,getDocs,query,where}=require("firebase/firestore");
 if(!process.env.FIRESTORE_EMULATOR_HOST) throw new Error("Integration tests require emulator; live execution refused.");
 process.env.GCLOUD_PROJECT="demo-rehberlik";
+process.env.GEMINI_API_KEY=""; // No live AI calls in integration tests.
 const api=require("../native-api");
 const {getFirestore,Timestamp}=require("firebase-admin/firestore");const {getApp,deleteApp}=require("firebase-admin/app");
 const D=require("../domain");
@@ -139,4 +140,39 @@ test("template queue preserves sent state across repeated schedule and token cha
   const ref=db.doc("sendQueue/template_mother_template");assert.equal((await ref.get()).exists,true);
   await ref.update({sent:true});await db.doc("users/mother").update({fcmToken:"new-token"});
   await api.sendDueNotifications.run({});assert.equal((await ref.get()).data().sent,true);
+});
+test("AI service failure persists a bot fallback and routes exactly one question to expert",async()=>{
+  await run("sendNativeMessage","mother",{messageId:"question",text:"Need help"});
+  await run("askFaqBot","mother",{sourceMessageId:"question"});
+  await run("askFaqBot","mother",{sourceMessageId:"question"});
+  const bot=(await db.doc("chats/mother/messages/bot_question").get()).data();
+  assert.equal(bot.escalated,true);assert.equal(bot.needsFeedback,false);
+  assert.equal((await db.doc("chats/mother").get()).data().pendingAdminCount,1);
+  assert.equal((await db.collection("admin_alerts").get()).size,1);
+});
+test("feedback retry is idempotent and cannot overwrite a submitted rating",async()=>{
+  await run("sendNativeMessage","mother",{messageId:"question",text:"Q"});
+  await db.doc("chats/mother/messages/bot_question").set({senderType:"bot",sourceMessageId:"question",relatedQuestion:"Q",needsFeedback:true,feedbackGiven:false});
+  await run("rateNativeAnswer","mother",{messageId:"bot_question",isSufficient:false});
+  await run("rateNativeAnswer","mother",{messageId:"bot_question",isSufficient:false});
+  await assert.rejects(run("rateNativeAnswer","mother",{messageId:"bot_question",isSufficient:true}),{code:"failed-precondition"});
+  assert.equal((await db.collection("admin_alerts").get()).size,1);
+});
+test("stale rendered quiz content is rejected without recording a wrong answer",async()=>{
+  await db.doc("MotherLearnCard/c1").update({gercek:"Changed"});
+  await assert.rejects(run("recordQuizAnswer","mother",{cardId:"c1",answer:"A1",question:"Q1",expectedAnswer:"A1",attemptId:"stale"}),{code:"failed-precondition"});
+  assert.equal((await db.collection("users/mother/wrongCards").get()).size,0);
+});
+test("credential migration dry run is read-only and apply preserves IDs and short passwords",async()=>{
+  const {promisify}=require("node:util"),{execFile}=require("node:child_process");
+  for(const uid of ["mother","elder","admin"]) await db.doc(`users/${uid}`).update({password:"old"});
+  await db.doc("users/mother/wrongCards/keep").set({cardId:"c1"});
+  const options={env:process.env,timeout:60000};
+  const dry=await promisify(execFile)(process.execPath,["scripts/migrate-users.js"],options);
+  assert.match(dry.stdout,/DRY RUN/);assert.doesNotMatch(dry.stdout,/905321|password|old/);
+  assert.equal((await db.doc("users/mother").get()).data().password,"old");
+  await promisify(execFile)(process.execPath,["scripts/migrate-users.js","--apply"],options);
+  assert.equal((await db.doc("users/mother").get()).data().password,undefined);
+  assert.equal((await db.doc("users/mother/wrongCards/keep").get()).exists,true);
+  assert.equal(await D.verifyPassword("old",(await db.doc("_credentials/mother").get()).data()),true);
 });

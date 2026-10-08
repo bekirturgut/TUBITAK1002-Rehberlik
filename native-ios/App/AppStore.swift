@@ -14,7 +14,8 @@ final class AppStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var records: [String:[ContentRecord]] = [:]
     @Published var users: [UserProfile] = []
-    @Published var correctIDs: Set<String> = [], wrongIDs: Set<String> = []
+    @Published var correctIDs: Set<String> = []
+    @Published var wrongIDs: Set<String> = []
     @Published var chats: [ChatSummary] = []
     @Published var notificationRoute: String?
     private var started=false
@@ -34,10 +35,10 @@ final class AppStore: ObservableObject {
         if let id=UserDefaults.standard.string(forKey:"native.installationID") { return id }
         let id=UUID().uuidString; UserDefaults.standard.set(id,forKey:"native.installationID"); return id
     }
-    func start() {
+    func start() async {
         guard !started else { return }; started=true
         if demo { loading=false; return }
-        if !UserDefaults.standard.bool(forKey:"native.remember") { try? Auth.auth().signOut() }
+        if !UserDefaults.standard.bool(forKey:"native.remember"),Auth.auth().currentUser != nil { await logout() }
         authHandle=Auth.auth().addStateDidChangeListener { [weak self] _, user in
             Task { @MainActor in self?.observeProfile(uid:user?.uid) }
         }
@@ -144,6 +145,9 @@ final class AppStore: ObservableObject {
     }
     func syncDevice() async {
         guard !demo,let uid=profile?.id else { return }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-emulator-testing") { return }
+        #endif
         do {
             let granted=try await UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.badge,.sound])
             guard profile?.id==uid else { return }

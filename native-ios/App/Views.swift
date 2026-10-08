@@ -23,9 +23,11 @@ struct RootView: View {
 struct RouteID:Identifiable { let id:String }
 struct LoginView:View {
     @EnvironmentObject var store:AppStore
-    @State private var phone="",password=""
+    @State private var phone=""
+    @State private var password=""
     @State private var role:UserRole = .mother
-    @State private var remember=false,busy=false
+    @State private var remember=false
+    @State private var busy=false
     var body:some View {
         NavigationStack {
             Form {
@@ -129,7 +131,8 @@ struct QuizView:View {
     @State private var index=0
     @State private var selected:String?
     @State private var correct:Bool?
-    @State private var busy=false,showAnswer=false
+    @State private var busy=false
+    @State private var showAnswer=false
     @State private var attemptID=UUID().uuidString
     @State private var failedOption:String?
     @State private var mode:String?

@@ -2,6 +2,8 @@ import SwiftUI
 import FirebaseCore
 import FirebaseAuth
 import FirebaseMessaging
+import FirebaseFirestore
+import FirebaseFunctions
 import UserNotifications
 
 @main
@@ -11,7 +13,7 @@ struct RehberlikApp: App {
     var body: some Scene {
         WindowGroup {
             RootView().environmentObject(store)
-                .task { store.start() }
+                .task { await store.start() }
                 .onReceive(NotificationCenter.default.publisher(for: .nativeTokenChanged)) { _ in
                     Task { await store.syncDevice() }
                 }
@@ -37,7 +39,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         config.apiKey="AIzaSyC7D0Wkq2YFvviAkfBVhm07Bi9QbLa6984"
         config.projectID="tubitak-86d68"; config.bundleID="com.tubitak.tubitak"
         config.storageBucket="tubitak-86d68.firebasestorage.app"
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-emulator-testing") {config.projectID="demo-rehberlik"}
+        #endif
         FirebaseApp.configure(options:config)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-emulator-testing") {
+            // Explicit debug-only integration mode; never connects test accounts to production.
+            Auth.auth().useEmulator(withHost:"127.0.0.1",port:9099)
+            let settings=Firestore.firestore().settings
+            settings.host="127.0.0.1:8080";settings.isSSLEnabled=false
+            Firestore.firestore().settings=settings
+            Functions.functions(region:"europe-west1").useEmulator(withHost:"127.0.0.1",port:5001)
+        }
+        #endif
         UNUserNotificationCenter.current().delegate=self
         Messaging.messaging().delegate=self
         return true

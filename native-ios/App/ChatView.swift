@@ -4,7 +4,8 @@ import FirebaseFirestore
 @MainActor
 final class ChatModel:ObservableObject {
     @Published var messages:[ChatMessage]=[]
-    @Published var loading=true,busy=false
+    @Published var loading=true
+    @Published var busy=false
     @Published var error:String?
     @Published var draft=""
     @Published var replyingTo:ChatMessage?
@@ -88,9 +89,9 @@ struct ChatView:View {
             if let id=model.retryBotID {HStack{Button("Botu tekrar dene"){Task{await model.askBot(store:store,id:id)}};Button("Uzmana ilet"){Task{await model.escalate(store:store,id:id)}}}.font(.footnote).padding()}
             if let reply=model.replyingTo {HStack{Text("Yanıt: \(reply.text)").lineLimit(2);Spacer();Button("Vazgeç"){model.replyingTo=nil}}.font(.caption).padding()}
             HStack(alignment:.bottom) {
-                TextField("Mesajınızı yazınız",text:$model.draft,axis:.vertical).lineLimit(1...5).textFieldStyle(.roundedBorder)
+                TextField("Mesajınızı yazınız",text:$model.draft,axis:.vertical).lineLimit(1...5).textFieldStyle(.roundedBorder).accessibilityIdentifier("chatDraft")
                 Button{Task{await model.send(store:store,uid:userID)}} label:{if model.busy {ProgressView()} else{Image(systemName:"paperplane.fill")}}
-                    .disabled(model.busy || model.draft.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty).accessibilityLabel("Mesaj gönder")
+                    .disabled(model.busy || model.draft.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty).accessibilityLabel("Mesaj gönder").accessibilityIdentifier("chatSend")
             }.padding().background(.bar)
         }.navigationTitle(store.profile?.role == .admin ? "Kullanıcı sohbeti":"Danış").navigationBarTitleDisplayMode(.inline)
         .task(id:userID){model.start(store:store,uid:userID)}.onDisappear{model.stop()}

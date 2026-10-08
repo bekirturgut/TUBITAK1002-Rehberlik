@@ -5,6 +5,7 @@
 **/.build/
 **/DerivedData/
 native-ios/Rehberlik.xcodeproj/
+native-ios/App/Info.plist
 **/*.xcresult/
 **/Package.resolved
 *.class

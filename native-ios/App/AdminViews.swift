@@ -17,7 +17,8 @@ struct AdminView:View {
 struct UsersView:View {
     @EnvironmentObject var store:AppStore
     @State private var search=""
-    @State private var create=false,logout=false
+    @State private var create=false
+    @State private var logout=false
     var body:some View {
         List {
             ForEach(UserRole.allCases){role in
@@ -29,7 +30,7 @@ struct UsersView:View {
                                 let pending=store.chats.first{$0.id==user.id}?.pendingCount ?? 0
                                 if pending>0 {Text("\(pending) yanıt bekleyen soru").font(.caption.bold()).foregroundStyle(.orange)}
                             }
-                        }
+                        }.accessibilityIdentifier("user-\(user.id)")
                     }
                 }
             }
@@ -46,13 +47,15 @@ struct UserDetailView:View {
     @EnvironmentObject var store:AppStore
     @Environment(\.dismiss) private var dismiss
     let user:UserProfile
-    @State private var edit=false,confirmDelete=false,busy=false
+    @State private var edit=false
+    @State private var confirmDelete=false
+    @State private var busy=false
     var latest:UserProfile {store.users.first{$0.id==user.id} ?? user}
     var body:some View {
         List {
             Section("Kullanıcı"){Text(latest.fullName);Text(latest.phone);Text(latest.role.rawValue)}
             Section {
-                NavigationLink("Sohbet ve uzman yanıtları"){ChatView(userID:user.id)}
+                NavigationLink("Sohbet ve uzman yanıtları"){ChatView(userID:user.id)}.accessibilityIdentifier("userChat")
                 NavigationLink("Giriş geçmişi"){HistoryView(userID:user.id)}
                 Button("Kullanıcıyı düzenle"){edit=true}
                 Button("Kullanıcıyı ve ilişkili verilerini sil",role:.destructive){confirmDelete=true}.disabled(busy || store.profile?.id==user.id)
@@ -69,9 +72,13 @@ struct UserEditor:View {
     @EnvironmentObject var store:AppStore
     @Environment(\.dismiss) private var dismiss
     let user:UserProfile?
-    @State private var name="",surname="",phone="",password=""
+    @State private var name=""
+    @State private var surname=""
+    @State private var phone=""
+    @State private var password=""
     @State private var role:UserRole = .mother
-    @State private var disabled=false,busy=false
+    @State private var disabled=false
+    @State private var busy=false
     @State private var creationID=UUID().uuidString
     @State private var saveError:String?
     var body:some View {
@@ -146,7 +153,7 @@ struct ContentListView:View {
             let items=(store.records[collection] ?? []).filter{search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) || $0.body.localizedCaseInsensitiveContains(search)}
             if items.isEmpty {Text("İçerik bulunmuyor.").foregroundStyle(.secondary)}
             ForEach(items){item in
-                Button{editing=item}label:{VStack(alignment:.leading,spacing:6){Text(item.title).font(.headline);Text(item.body).lineLimit(2).foregroundStyle(.secondary);if !item.active{Text("Pasif").font(.caption).foregroundStyle(.orange)}}.foregroundStyle(.primary)
+                Button{editing=item}label:{VStack(alignment:.leading,spacing:6){Text(item.title).font(.headline);Text(item.body).lineLimit(2).foregroundStyle(.secondary);if !item.active{Text("Pasif").font(.caption).foregroundStyle(.orange)}}}.foregroundStyle(.primary)
                     .swipeActions{Button("Sil",role:.destructive){deleting=item}.disabled(busy)}
             }
         }.navigationTitle(kind.title).searchable(text:$search)
@@ -162,9 +169,12 @@ struct ContentEditor:View {
     @EnvironmentObject var store:AppStore
     @Environment(\.dismiss) private var dismiss
     let kind:ContentKind,role:UserRole,item:ContentRecord?
-    @State private var title="",bodyText=""
-    @State private var week=1,days=0
-    @State private var active=true,busy=false
+    @State private var title=""
+    @State private var bodyText=""
+    @State private var week=1
+    @State private var days=0
+    @State private var active=true
+    @State private var busy=false
     @State private var target:UserRole = .mother
     @State private var creationID=UUID().uuidString
     @State private var createdAt=Date()

@@ -29,6 +29,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.tubitak.tubitak
         CODE_SIGN_ENTITLEMENTS: App/Rehberlik.entitlements
         INFOPLIST_KEY_UIBackgroundModes: [remote-notification]
+    info:
+      path: App/Info.plist
+      properties:
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     dependencies:
       - package: Firebase
         product: FirebaseAuth
@@ -58,3 +63,5 @@ schemes:
         Rehberlik: all
     test:
       targets: [RehberlikTests, RehberlikUITests]
+      environmentVariables:
+        RUN_FIREBASE_UI_TESTS: $(RUN_FIREBASE_UI_TESTS)

@@ -15,7 +15,10 @@ const db = getFirestore();
 const stamp = () => FieldValue.serverTimestamp();
 const geminiKey = defineSecret("GEMINI_API_KEY");
 setGlobalOptions({ region: "europe-west1", maxInstances: 10 });
-const ai = () => new GoogleGenAI({ apiKey: geminiKey.value() });
+const ai = () => {
+  if(process.env.FUNCTIONS_EMULATOR==="true" && process.env.GCLOUD_PROJECT==="demo-rehberlik") return {models:{embedContent:async()=>{throw new Error("Emulated AI unavailable");}}};
+  return new GoogleGenAI({ apiKey: geminiKey.value() });
+};
 function callable(handler, options = {}) {
   return onCall(options, async req => {
     try { return await handler(req); }
@@ -166,7 +169,7 @@ exports.sendNativeMessage = callable(async req=>{
   await db.runTransaction(async tx=>{
     const [old,currentTarget,currentActor]=await Promise.all([tx.get(ref),tx.get(db.doc(`users/${uid}`)),tx.get(db.doc(`users/${actor.id}`))]);
     if(!currentTarget.exists || currentTarget.data().disabled || currentTarget.data().deleting || !currentActor.exists || currentActor.data().disabled || currentActor.data().deleting || currentActor.data().role!==actor.role || currentActor.data().sessionVersion!==actor.sessionVersion) throw new HttpsError("permission-denied","Hesap değişti.");
-    if(old.exists) { if(old.data().text!==text || old.data().senderId!==actor.id) throw new HttpsError("already-exists","Mesaj kimliği kullanımda."); return; }
+    if(old.exists) { if(old.data().text!==text || old.data().senderId!==actor.id || (old.data().replyToMessageId || null)!==replyID) throw new HttpsError("already-exists","Mesaj kimliği kullanımda."); return; }
     tx.set(ref,{text,senderType:actor.role==="Admin"?"admin":"user",senderId:actor.id,senderRole:actor.role,createdAt:stamp(),needsAdminReply:false,isAnswered:false,...(replyID ? {replyToMessageId:replyID}:{})});
     tx.set(db.doc(`chats/${uid}`),{userId:uid,updatedAt:stamp()},{merge:true});
   });
@@ -177,8 +180,8 @@ async function processQuestion(uid,messageID) {
   const questionDoc=await db.doc(`chats/${uid}/messages/${messageID}`).get();
   if(!questionDoc.exists || questionDoc.data().senderType!=="user" || questionDoc.data().senderId!==uid) throw new HttpsError("permission-denied","Mesaj size ait değil.");
   const question=questionDoc.data().text; const botRef=db.doc(`chats/${uid}/messages/bot_${messageID}`);
-  if((await botRef.get()).exists) return {success:true};
   const jobRef=db.doc(`_botJobs/${uid}_${messageID}`);
+  if((await botRef.get()).exists) { await jobRef.delete(); return {success:true}; }
   const acquired=await db.runTransaction(async tx=>{
     const job=await tx.get(jobRef);
     if(job.data()?.leaseUntil>Date.now()) return false;
@@ -190,7 +193,7 @@ async function processQuestion(uid,messageID) {
     await limit(`bot-generation:${uid}`,20,3600);
     const model=ai(); const embed=await model.models.embedContent({model:"gemini-embedding-001",contents:question,config:{outputDimensionality:768}});
     const faq=await db.collection("faq_items").where("isActive","==",true).get();
-    const ranked=faq.docs.map(d=>({id:d.id,...d.data(),score:D.cosine(embed.embeddings[0].values,d.data().embedding)})).filter(x=>x.answer).sort((a,b)=>b.score-a.score);
+    const ranked=faq.docs.filter(d=>d.data().embeddingQuestion===d.data().question).map(d=>({id:d.id,...d.data(),score:D.cosine(embed.embeddings[0].values,d.data().embedding)})).filter(x=>x.answer).sort((a,b)=>b.score-a.score);
     score=ranked[0]?.score || 0; matches=ranked.filter(x=>x.score>=0.60).slice(0,5);
     if(matches.length) {
       answer=matches[0].answer; needsFeedback=true;
@@ -222,6 +225,10 @@ exports.nativeUserMessageBot = onDocumentCreated({document:"chats/{uid}/messages
   if(!profile.exists || profile.data().disabled || profile.data().deleting) return;
   await processQuestion(event.params.uid,event.params.id);
 });
+exports.nativeExpertReply = onDocumentCreated({document:"chats/{uid}/messages/{id}",retry:true},async event=>{
+  if(event.data?.data().senderType!=="admin") return;
+  await resolveReply(event.params.uid,event.params.id);
+});
 exports.escalateChatToAdmin = callable(async req=>{
   const actor=await user(req); const id=input(()=>D.id(req.data?.sourceMessageId)); const doc=await db.doc(`chats/${actor.id}/messages/${id}`).get();
   if(!doc.exists || doc.data().senderId!==actor.id) throw new HttpsError("permission-denied","Mesaj size ait değil.");
@@ -230,10 +237,15 @@ exports.escalateChatToAdmin = callable(async req=>{
 exports.rateNativeAnswer = callable(async req=>{
   const actor=await user(req); const botID=input(()=>D.id(req.data?.messageId));
   if(typeof req.data?.isSufficient!=="boolean") throw new HttpsError("invalid-argument","Geri bildirim geçersiz.");
-  const ref=db.doc(`chats/${actor.id}/messages/${botID}`); const snap=await ref.get();
-  if(!snap.exists || snap.data().senderType!=="bot" || !snap.data().needsFeedback) throw new HttpsError("failed-precondition","Geri bildirim alınamıyor.");
-  if(!req.data.isSufficient) await escalate(actor.id,snap.data().sourceMessageId,snap.data().relatedQuestion,snap.data().score);
-  await ref.update({feedbackGiven:true,isSufficient:req.data.isSufficient}); return {success:true};
+  const ref=db.doc(`chats/${actor.id}/messages/${botID}`);
+  const data=await db.runTransaction(async tx=>{
+    const snap=await tx.get(ref);
+    if(!snap.exists || snap.data().senderType!=="bot" || !snap.data().needsFeedback) throw new HttpsError("failed-precondition","Geri bildirim alınamıyor.");
+    if(snap.data().feedbackGiven && snap.data().isSufficient!==req.data.isSufficient) throw new HttpsError("failed-precondition","Geri bildirim zaten kaydedildi.");
+    tx.update(ref,{feedbackGiven:true,isSufficient:req.data.isSufficient});return snap.data();
+  });
+  if(!req.data.isSufficient) await escalate(actor.id,data.sourceMessageId,data.relatedQuestion,data.score);
+  return {success:true};
 });
 async function resolveReply(uid,messageID) {
   const message=await db.doc(`chats/${uid}/messages/${messageID}`).get(); const data=message.data();
@@ -272,8 +284,12 @@ exports.nativeFaqEmbedding = onDocumentWritten({document:"faq_items/{id}",secret
   try {
     const result=await ai().models.embedContent({model:"gemini-embedding-001",contents:question,config:{outputDimensionality:768}});
     await db.runTransaction(async tx=>{const latest=await tx.get(after.ref); if(latest.data()?.question!==question) return;
-      tx.update(after.ref,{embedding:result.embeddings[0].values,embeddingDim:result.embeddings[0].values.length,embeddingModel:"gemini-embedding-001",embeddingError:FieldValue.delete()});});
-  } catch(e) { console.error("Embedding failed",e.name); }
+      tx.update(after.ref,{embedding:result.embeddings[0].values,embeddingQuestion:question,embeddingDim:result.embeddings[0].values.length,embeddingModel:"gemini-embedding-001",embeddingError:FieldValue.delete()});});
+  } catch(e) {
+    console.error("Embedding failed",e.name);
+    await db.runTransaction(async tx=>{const latest=await tx.get(after.ref);if(latest.data()?.question!==question)return;
+      tx.update(after.ref,{embedding:FieldValue.delete(),embeddingError:"Eşleştirme verisi oluşturulamadı. Yeniden denemek için soruyu güncelleyiniz."});});
+  }
 });
 exports.nativeAdminAlertPush = onDocumentWritten("admin_alerts/{id}",async event=>{
   const after=event.data.after; if(!after.exists || after.data().status!=="open" || event.data.before.exists) return;

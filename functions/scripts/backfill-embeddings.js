@@ -9,7 +9,7 @@ async function main() {
     const question=String(row.data().question || "").trim();if(!question)continue;
     const result=await ai.models.embedContent({model:"gemini-embedding-001",contents:question,config:{outputDimensionality:768}});
     await db.runTransaction(async tx=>{const fresh=await tx.get(row.ref);if(fresh.data()?.question!==question)return;
-      tx.update(row.ref,{embedding:result.embeddings[0].values,embeddingDim:result.embeddings[0].values.length,embeddingModel:"gemini-embedding-001",embeddingError:FieldValue.delete()});});
+      tx.update(row.ref,{embedding:result.embeddings[0].values,embeddingQuestion:question,embeddingDim:result.embeddings[0].values.length,embeddingModel:"gemini-embedding-001",embeddingError:FieldValue.delete()});});
   }
   console.log("Backfill complete.");
 }
