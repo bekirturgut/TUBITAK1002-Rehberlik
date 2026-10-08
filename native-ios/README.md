@@ -16,6 +16,8 @@ xcodebuild build -project Rehberlik.xcodeproj -scheme Rehberlik -configuration R
 
 GitHub Actions performs core tests, app/unit/UI simulator tests, and an unsigned physical-device build. Unsigned artifacts cannot be installed on an iPhone. UI tests cover both `-ui-testing` in-memory fixtures and a debug-only `-emulator-testing` flow against isolated Auth, Firestore and Functions emulators: mother login, server-graded quiz, AI fallback, admin login/expert reply, and receipt by the mother account. The emulator flow is enabled by `RUN_FIREBASE_UI_TESTS=1` in CI. These tests do not prove production IAM, Gemini availability or APNs delivery.
 
+The CI job verifies the actual callable HTTP protocol and Firebase Auth token exchange before starting Xcode, then resets only the isolated demo fixtures. Simulator tests use local ad-hoc signing and separate Keychain entitlements; no Apple account is needed for these tests.
+
 ## Feature mapping
 
 | Flutter | Native SwiftUI |

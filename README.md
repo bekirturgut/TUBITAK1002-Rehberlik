@@ -48,6 +48,6 @@ xcodebuild test -project Rehberlik.xcodeproj -scheme Rehberlik -destination 'pla
 5. Secret Manager, Auth custom-token imzalama yetkileri, yeni fonksiyonlar ve kuralları birlikte devreye alın; eski tetikleyicileri kaldırın.
 6. Hocanın Apple Developer hesabı ile APNs, imzalama ve TestFlight yapılandırmasını tamamlayın.
 
-Ayrıntılar ve ekran eşleştirmesi: **[Native iOS rehberi](native-ios/README.md)**.
+Ayrıntılar ve ekran eşleştirmesi: **[Native iOS rehberi](native-ios/README.md)**. Yapılan düzeltmeler ve doğrulama sonuçları: **[Swift geçiş raporu](docs/SWIFT_GECIS_RAPORU.md)**.
 
 Test kapsamı bütün olası hataları veya canlı ortam davranışlarını garanti etmez. Gerçek iPhone bildirimleri, Apple imzalama ve canlı veri geçişi ayrıca doğrulanmalıdır.
