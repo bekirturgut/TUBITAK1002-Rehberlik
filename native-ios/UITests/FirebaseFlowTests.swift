@@ -1,4 +1,5 @@
 import XCTest
+import Foundation
 
 final class FirebaseFlowTests:XCTestCase {
     override func setUp(){super.setUp();continueAfterFailure=false}
@@ -15,6 +16,13 @@ final class FirebaseFlowTests:XCTestCase {
     }
     func testRealFirebaseLoginQuizAndExpertConversation() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["RUN_FIREBASE_UI_TESTS"]=="1","Requires local demo Firebase emulators.")
+        let ready=expectation(description:"Legacy mother fixture exists")
+        URLSession.shared.dataTask(with:URL(string:"http://127.0.0.1:8080/v1/projects/demo-rehberlik/databases/(default)/documents/users/mother")!){data,response,error in
+            XCTAssertNil(error);XCTAssertEqual((response as? HTTPURLResponse)?.statusCode,200)
+            if let data,let json=try? JSONSerialization.jsonObject(with:data) as? [String:Any],let fields=json["fields"] as? [String:Any] {XCTAssertEqual((fields["phone"] as? [String:Any])?["stringValue"] as? String,"+905321234567")}
+            ready.fulfill()
+        }.resume()
+        wait(for:[ready],timeout:15)
         let app=XCUIApplication();app.launchArguments=["-emulator-testing"];app.launch()
         authenticate(app,phone:"05321234567",role:"Anne")
         XCTAssertTrue(app.buttons["learning"].waitForExistence(timeout:60))

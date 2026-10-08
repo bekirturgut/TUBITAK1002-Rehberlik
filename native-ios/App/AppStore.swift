@@ -1,4 +1,5 @@
 import Foundation
+import FirebaseCore
 import SwiftUI
 import FirebaseFirestore
 import FirebaseFunctions
@@ -122,7 +123,17 @@ final class AppStore: ObservableObject {
         let password=password.trimmingCharacters(in:.whitespacesAndNewlines)
         guard !normalized.isEmpty,!password.isEmpty else { throw EditorError.invalid("Telefon ve şifre giriniz.") }
         if demo { loadDemo(role:role); return }
-        let result=try await db.collection("users").whereField("phone",isEqualTo:normalized).limit(to:1).getDocuments()
+        let query=db.collection("users").whereField("phone",isEqualTo:normalized).limit(to:1)
+        let result:QuerySnapshot
+        #if DEBUG
+        if db.settings.host.hasPrefix("127.0.0.1:") {result=try await query.getDocuments(source:.server)}
+        else {result=try await query.getDocuments()}
+        if ProcessInfo.processInfo.arguments.contains("-emulator-testing"),result.isEmpty {
+            throw EditorError.invalid("Demo kullanıcı bulunamadı. Proje: \(FirebaseApp.app()?.options.projectID ?? "nil"), host: \(db.settings.host)")
+        }
+        #else
+        result=try await query.getDocuments()
+        #endif
         guard let doc=result.documents.first else { throw EditorError.invalid("Kullanıcı bulunamadı.") }
         guard doc.data()["password"] as? String == password else { throw EditorError.invalid("Şifre yanlış.") }
         guard doc.data()["role"] as? String == role.rawValue else { throw EditorError.invalid("Bu rolde bu kullanıcı yok.") }
@@ -215,10 +226,9 @@ final class AppStore: ObservableObject {
     }
     func refreshStats(uid:String,assignedCount:Int) async throws {
         let ref=db.collection("users").document(uid)
-        async let correct=ref.collection("correctCards").getDocuments()
-        async let wrong=ref.collection("wrongCards").getDocuments()
-        async let user=ref.getDocument()
-        let (c,w,u)=try await (correct,wrong,user)
+        let c=try await ref.collection("correctCards").getDocuments()
+        let w=try await ref.collection("wrongCards").getDocuments()
+        let u=try await ref.getDocument()
         let previous=(u.data()?["quizStats"] as? [String:Any])?["earnedBadges"] as? [Int] ?? []
         let percent=LegacyPolicy.percent(correct:c.count,assigned:assignedCount)
         let badges=Array(Set(previous+[25,50,75,100].filter{percent >= $0})).sorted()
