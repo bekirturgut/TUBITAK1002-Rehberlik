@@ -70,6 +70,7 @@ public struct QuizSummary: Equatable, Sendable {
         wrongCount = valid.intersection(wrong.subtracting(correct)).count
         percent = valid.isEmpty ? 0 : correctCount * 100 / valid.count
         let thresholds = [25, 50, 75, 100]
-        earnedBadges = Array(Set(previouslyEarned.filter { thresholds.contains($0) } + thresholds.filter { percent >= $0 })).sorted()
+        let currentPercent = percent
+        earnedBadges = Array(Set(previouslyEarned.filter { thresholds.contains($0) } + thresholds.filter { currentPercent >= $0 })).sorted()
     }
 }

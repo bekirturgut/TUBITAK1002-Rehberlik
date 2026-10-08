@@ -37,7 +37,7 @@ struct LoginView:View {
                     }.frame(maxWidth:.infinity).padding()
                 }
                 Section("Giriş") {
-                    Picker("Rol",selection:$role){ForEach(UserRole.allCases){Text($0.rawValue).tag($0)}}.accessibilityIdentifier("rolePicker")
+                    Picker("Rol",selection:$role){ForEach(UserRole.allCases){Text($0.rawValue).tag($0)}}.pickerStyle(.segmented).accessibilityIdentifier("rolePicker")
                     TextField("Telefon numarası",text:$phone).keyboardType(.phonePad).textContentType(.telephoneNumber).accessibilityIdentifier("phone")
                     SecureField("Şifre",text:$password).textContentType(.password).accessibilityIdentifier("password")
                     Toggle("Beni hatırla",isOn:$remember)

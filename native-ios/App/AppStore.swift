@@ -60,7 +60,11 @@ final class AppStore: ObservableObject {
                     guard !next.disabled else { throw DomainError.invalidProfile }
                     let needsReload=self.profile?.role != next.role || self.profile?.id != next.id
                     self.profile=next; self.loading=false
-                    if needsReload { self.clearData(); self.subscribe(next); await self.syncDevice() }
+                    if needsReload {
+                        self.clearData(); self.subscribe(next)
+                        self.openNotification(NotificationInbox.shared.pending)
+                        await self.syncDevice()
+                    }
                 } catch { self.errorMessage=error.localizedDescription; await self.logout() }
             }
         }
@@ -149,6 +153,7 @@ final class AppStore: ObservableObject {
     }
     func openNotification(_ data:[AnyHashable:Any]?) {
         guard let profile,let uid=data?["userId"] as? String else { return }
+        NotificationInbox.shared.pending=nil
         if profile.role == .admin || profile.id==uid { notificationRoute=uid }
     }
     func saveContent(collection:String,id:String?,data:[String:Any]) async throws {

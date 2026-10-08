@@ -1,8 +1,8 @@
 // Run with Application Default Credentials. Dry run is the default.
 // Never prints passwords, hashes, phone numbers or names.
-const admin=require("firebase-admin");const D=require("../domain");
+const {initializeApp}=require("firebase-admin/app");const {getFirestore,FieldValue}=require("firebase-admin/firestore");const D=require("../domain");
 async function main() {
-  admin.initializeApp();const db=admin.firestore();
+  initializeApp();const db=getFirestore();
   const apply=process.argv.includes("--apply");
   const users=await db.collection("users").get();
   const seen=new Set(),plans=[];
@@ -31,7 +31,7 @@ async function main() {
       if(D.phone(latest.data().phone)!==p.phone) throw new Error("Profile changed; stopped.");
       tx.set(db.doc(`_phoneLogins/${D.key(p.phone)}`),{uid:p.ref.id});
       if(p.credential) tx.set(db.doc(`_credentials/${p.ref.id}`),p.credential);
-      tx.update(p.ref,{phone:p.phone,password:admin.firestore.FieldValue.delete()});
+      tx.update(p.ref,{phone:p.phone,password:FieldValue.delete()});
     });
   }
   console.log("Migration complete; IDs and subcollections preserved.");

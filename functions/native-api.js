@@ -1,15 +1,18 @@
 "use strict";
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { onDocumentWritten, onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const { defineSecret } = require("firebase-functions/params");
-const admin = require("firebase-admin");
+const { initializeApp, getApps } = require("firebase-admin/app");
+const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
+const { getAuth } = require("firebase-admin/auth");
+const { getMessaging } = require("firebase-admin/messaging");
 const { GoogleGenAI } = require("@google/genai");
 const D = require("./domain");
-if (!admin.apps.length) admin.initializeApp();
-const db = admin.firestore();
-const stamp = () => admin.firestore.FieldValue.serverTimestamp();
+if (!getApps().length) initializeApp();
+const db = getFirestore();
+const stamp = () => FieldValue.serverTimestamp();
 const geminiKey = defineSecret("GEMINI_API_KEY");
 setGlobalOptions({ region: "europe-west1", maxInstances: 10 });
 const ai = () => new GoogleGenAI({ apiKey: geminiKey.value() });
@@ -38,7 +41,7 @@ async function limit(scope, max, seconds) {
     const active=old.until > now;
     if (active && old.count >= max) throw new HttpsError("resource-exhausted", "Çok fazla deneme. Daha sonra tekrar deneyiniz.");
     tx.set(ref,{ count: active ? old.count+1 : 1, until: active ? old.until : now+seconds*1000,
-      expiresAt: admin.firestore.Timestamp.fromMillis(now+seconds*2000) });
+      expiresAt: Timestamp.fromMillis(now+seconds*2000) });
   });
 }
 exports.loginWithPhone = callable(async req => {
@@ -51,7 +54,7 @@ exports.loginWithPhone = callable(async req => {
   if (!await D.verifyPassword(req.data?.password, credential)) throw new HttpsError("unauthenticated", "Telefon veya şifre hatalı.");
   const profile = await db.doc(`users/${uid}`).get();
   if (!profile.exists || profile.data().disabled || profile.data().deleting || req.data.role !== profile.data().role) throw new HttpsError("unauthenticated", "Telefon, şifre veya rol hatalı.");
-  const token = await admin.auth().createCustomToken(uid);
+  const token = await getAuth().createCustomToken(uid);
   await db.collection(`users/${uid}/loginHistory`).add({ createdAt: stamp() });
   return { token };
 });
@@ -76,17 +79,17 @@ exports.saveNativeUser = callable(async req => {
     tx.set(ref,{name,surname,phone,role:data.role,disabled:data.disabled === true,updatedAt:stamp(),...(!old.exists ? {createdAt:stamp()} : {})},{merge:true});
     if(credential) tx.set(db.doc(`_credentials/${uid}`),credential);
   });
-  if (credential || data.disabled) { try { await admin.auth().revokeRefreshTokens(uid); } catch(e) { if(e.code !== "auth/user-not-found") throw e; } }
+  if (credential || data.disabled) { try { await getAuth().revokeRefreshTokens(uid); } catch(e) { if(e.code !== "auth/user-not-found") throw e; } }
   return { id:uid };
 });
 exports.deleteNativeUser = callable(async req => {
   const actor=await user(req,true); const uid=input(()=>D.id(req.data?.id));
   if(actor.id===uid) throw new HttpsError("failed-precondition","Kendi hesabınızı silemezsiniz.");
   const ref=db.doc(`users/${uid}`); const snap=await ref.get(); if(!snap.exists) return {success:true};
-  await ref.update({deleting:true,disabled:true,fcmToken:admin.firestore.FieldValue.delete()});
+  await ref.update({deleting:true,disabled:true,fcmToken:FieldValue.delete()});
   if(snap.data().phone) await db.doc(`_phoneLogins/${D.key(D.phone(snap.data().phone))}`).delete();
   await db.doc(`_credentials/${uid}`).delete();
-  try { await admin.auth().deleteUser(uid); } catch(e) { if(e.code!=="auth/user-not-found") throw e; }
+  try { await getAuth().deleteUser(uid); } catch(e) { if(e.code!=="auth/user-not-found") throw e; }
   for(const col of ["sendQueue","admin_alerts"]) {
     while(true) {
       const rows=await db.collection(col).where(col==="sendQueue"?"uid":"userId","==",uid).limit(200).get(); if(rows.empty) break;
@@ -99,17 +102,15 @@ exports.recordQuizAnswer = callable(async req => {
   const profile=await user(req); const collection=input(()=>D.collection(profile.role));
   const cardID=input(()=>D.id(req.data?.cardId)); const answer=input(()=>D.text(req.data?.answer,"Cevap",10000));
   const attemptID=input(()=>D.id(req.data?.attemptId)); const ref=db.doc(`users/${profile.id}`);
-  const cards=await db.collection(collection).get();
-  const valid=D.eligible(cards.docs.map(d=>({id:d.id,...d.data()})),D.week(profile.createdAt));
-  if(!valid.some(c=>c.id===cardID)) throw new HttpsError("failed-precondition","Kart artık kullanılabilir değil.");
   return db.runTransaction(async tx => {
     const attemptRef=ref.collection("quizAttempts").doc(attemptID);
-    const [attempt,current,card,correct,wrong] = await Promise.all([tx.get(attemptRef),tx.get(ref),tx.get(db.doc(`${collection}/${cardID}`)),tx.get(ref.collection("correctCards")),tx.get(ref.collection("wrongCards"))]);
+    const [attempt,current,card,correct,wrong,cards] = await Promise.all([tx.get(attemptRef),tx.get(ref),tx.get(db.doc(`${collection}/${cardID}`)),tx.get(ref.collection("correctCards")),tx.get(ref.collection("wrongCards")),tx.get(db.collection(collection))]);
     if(attempt.exists) {
       if(attempt.data().cardId!==cardID || attempt.data().answer!==answer) throw new HttpsError("already-exists","Deneme kimliği başka bir cevap için kullanıldı.");
       return attempt.data().result;
     }
     if(!current.exists || current.data().disabled || current.data().deleting || current.data().role!==profile.role) throw new HttpsError("permission-denied","Hesap değişti.");
+    const valid=D.eligible(cards.docs.map(d=>({id:d.id,...d.data()})),D.week(current.data().createdAt));
     if(!card.exists || !D.eligible([{id:card.id,...card.data()}],D.week(current.data().createdAt)).length) throw new HttpsError("failed-precondition","Kart değişti.");
     const isCorrect=answer===String(card.data().gercek).trim();
     const correctIDs=correct.docs.filter(d=>d.data().collectionName===collection).map(d=>d.data().cardId).filter(x=>x!==cardID);
@@ -118,16 +119,19 @@ exports.recordQuizAnswer = callable(async req => {
     const summary=D.stats(valid,correctIDs,wrongIDs,current.data().quizStats?.earnedBadges || []);
     const progressID=`${collection}_${cardID}`;
     const progress={cardId:cardID,collectionName:collection,question:card.data().bilinen,answer:card.data().gercek,updatedAt:stamp()};
-    tx.set(ref.collection(isCorrect?"correctCards":"wrongCards").doc(progressID),{...progress,...(isCorrect ? {correctAt:stamp()} : {wrongAt:stamp(),nextReviewAt:admin.firestore.Timestamp.fromMillis(Date.now()+86400000)})});
+    tx.set(ref.collection(isCorrect?"correctCards":"wrongCards").doc(progressID),{...progress,...(isCorrect ? {correctAt:stamp()} : {wrongAt:stamp(),nextReviewAt:Timestamp.fromMillis(Date.now()+86400000)})});
     tx.delete(ref.collection(isCorrect?"wrongCards":"correctCards").doc(progressID));
     tx.update(ref,{quizStats:{...summary,updatedAt:stamp()}});
     const result={isCorrect,stats:summary}; tx.set(attemptRef,{cardId:cardID,answer,result,createdAt:stamp()}); return result;
   });
 });
 async function syncPending(uid) {
-  const questions=await db.collection(`chats/${uid}/messages`).where("senderType","==","user").get();
-  const pending=questions.docs.filter(d=>d.data().needsAdminReply && !d.data().isAnswered).length;
-  await db.doc(`chats/${uid}`).set({userId:uid,hasPendingAdminReply:pending>0,pendingAdminCount:pending,updatedAt:stamp()},{merge:true});
+  await db.runTransaction(async tx=>{
+    const [profile,questions]=await Promise.all([tx.get(db.doc(`users/${uid}`)),tx.get(db.collection(`chats/${uid}/messages`).where("senderType","==","user"))]);
+    if(!profile.exists || profile.data().deleting) return;
+    const pending=questions.docs.filter(d=>d.data().needsAdminReply && !d.data().isAnswered).length;
+    tx.set(db.doc(`chats/${uid}`),{userId:uid,hasPendingAdminReply:pending>0,pendingAdminCount:pending,updatedAt:stamp()},{merge:true});
+  });
 }
 async function escalate(uid,messageID,question,score=0) {
   const msg=db.doc(`chats/${uid}/messages/${messageID}`), alert=db.doc(`admin_alerts/${uid}_${messageID}`);
@@ -156,13 +160,18 @@ exports.sendNativeMessage = callable(async req=>{
   if(actor.role==="Admin") await resolveReply(uid,messageID);
   return {success:true};
 });
-exports.askFaqBot = callable(async req=>{
-  const actor=await user(req); const uid=actor.id; const messageID=input(()=>D.id(req.data?.sourceMessageId));
+async function processQuestion(uid,messageID) {
   const questionDoc=await db.doc(`chats/${uid}/messages/${messageID}`).get();
   if(!questionDoc.exists || questionDoc.data().senderType!=="user" || questionDoc.data().senderId!==uid) throw new HttpsError("permission-denied","Mesaj size ait değil.");
   const question=questionDoc.data().text; const botRef=db.doc(`chats/${uid}/messages/bot_${messageID}`);
   if((await botRef.get()).exists) return {success:true};
-  await limit(`bot:${uid}`,20,3600);
+  const jobRef=db.doc(`_botJobs/${uid}_${messageID}`);
+  const acquired=await db.runTransaction(async tx=>{
+    const job=await tx.get(jobRef);
+    if(job.data()?.leaseUntil>Date.now()) return false;
+    tx.set(jobRef,{uid,messageID,leaseUntil:Date.now()+180000,updatedAt:stamp()},{merge:true});return true;
+  });
+  if(!acquired) return {success:true,processing:true};
   let answer, score=0, matches=[], needsFeedback=false;
   try {
     const model=ai(); const embed=await model.models.embedContent({model:"gemini-embedding-001",contents:question,config:{outputDimensionality:768}});
@@ -181,8 +190,21 @@ exports.askFaqBot = callable(async req=>{
   if(escalated) { answer="Sorunuzu uzman desteğine yönlendirdim. Uzman yanıtı bu sohbette görünecek."; await escalate(uid,messageID,question,score); }
   try { await botRef.create({text:answer,senderType:"bot",senderId:"chatbot",createdAt:stamp(),sourceMessageId:messageID,relatedQuestion:question,score,needsFeedback,feedbackGiven:false,escalated,matchedDocIds:matches.map(x=>x.id)}); }
   catch(e) { if(e.code!==6) throw e; }
+  await jobRef.delete();
   return {success:true};
+}
+exports.askFaqBot = callable(async req=>{
+  const actor=await user(req); const id=input(()=>D.id(req.data?.sourceMessageId));
+  await limit(`bot:${actor.id}`,20,3600);
+  return processQuestion(actor.id,id);
 },{secrets:[geminiKey],timeoutSeconds:120});
+exports.nativeUserMessageBot = onDocumentCreated({document:"chats/{uid}/messages/{id}",secrets:[geminiKey],timeoutSeconds:120,retry:true},async event=>{
+  const data=event.data?.data();
+  if(!data || data.senderType!=="user") return;
+  const profile=await db.doc(`users/${event.params.uid}`).get();
+  if(!profile.exists || profile.data().disabled || profile.data().deleting) return;
+  await processQuestion(event.params.uid,event.params.id);
+});
 exports.escalateChatToAdmin = callable(async req=>{
   const actor=await user(req); const id=input(()=>D.id(req.data?.sourceMessageId)); const doc=await db.doc(`chats/${actor.id}/messages/${id}`).get();
   if(!doc.exists || doc.data().senderId!==actor.id) throw new HttpsError("permission-denied","Mesaj size ait değil.");
@@ -215,7 +237,7 @@ exports.updateNativeDevice = callable(async req=>{
   }); return {success:true};
 });
 async function enqueuePush(id,uid,payload) {
-  try { await db.doc(`sendQueue/${id}`).create({uid,...payload,dueAt:admin.firestore.Timestamp.now(),sent:false,attempts:0,createdAt:stamp()}); }
+  try { await db.doc(`sendQueue/${id}`).create({uid,...payload,dueAt:Timestamp.now(),sent:false,attempts:0,createdAt:stamp()}); }
   catch(e) { if(e.code!==6) throw e; }
 }
 exports.nativeFaqEmbedding = onDocumentWritten({document:"faq_items/{id}",secrets:[geminiKey]},async event=>{
@@ -225,7 +247,7 @@ exports.nativeFaqEmbedding = onDocumentWritten({document:"faq_items/{id}",secret
   try {
     const result=await ai().models.embedContent({model:"gemini-embedding-001",contents:question,config:{outputDimensionality:768}});
     await db.runTransaction(async tx=>{const latest=await tx.get(after.ref); if(latest.data()?.question!==question) return;
-      tx.update(after.ref,{embedding:result.embeddings[0].values,embeddingDim:result.embeddings[0].values.length,embeddingModel:"gemini-embedding-001",embeddingError:admin.firestore.FieldValue.delete()});});
+      tx.update(after.ref,{embedding:result.embeddings[0].values,embeddingDim:result.embeddings[0].values.length,embeddingModel:"gemini-embedding-001",embeddingError:FieldValue.delete()});});
   } catch(e) { console.error("Embedding failed",e.name); }
 });
 exports.nativeAdminAlertPush = onDocumentWritten("admin_alerts/{id}",async event=>{
@@ -234,14 +256,14 @@ exports.nativeAdminAlertPush = onDocumentWritten("admin_alerts/{id}",async event
   for(const doc of admins.docs) if(!doc.data().disabled) await enqueuePush(`alert_${event.params.id}_${doc.id}`,doc.id,{title:"Yeni uzman destek talebi",body:"Yanıt bekleyen bir kullanıcı sorusu var.",data:{type:"admin_alert",userId:after.data().userId}});
 });
 exports.sendDueNotifications = onSchedule({schedule:"every 1 minutes",timeZone:"Europe/Istanbul",timeoutSeconds:540},async()=>{
-  const now=admin.firestore.Timestamp.now(); const templates=await db.collection("notifications").where("isActive","==",true).get();
+  const now=Timestamp.now(); const templates=await db.collection("notifications").where("isActive","==",true).get();
   for(const template of templates.docs) {
     const t=template.data(); if(!D.ROLES.includes(t.targetRole)) continue;
     const users=await db.collection("users").where("role","==",t.targetRole).get();
     for(const u of users.docs) {
       if(u.data().disabled || u.data().deleting || !u.data().createdAt?.toMillis) continue;
       const due=u.data().createdAt.toMillis()+Number(t.delayDays || 0)*86400000; if(!Number.isFinite(due) || due>Date.now()) continue;
-      try { await db.doc(`sendQueue/template_${u.id}_${template.id}`).create({uid:u.id,templateId:template.id,dueAt:admin.firestore.Timestamp.fromMillis(due),sent:false,attempts:0,createdAt:stamp()}); }
+      try { await db.doc(`sendQueue/template_${u.id}_${template.id}`).create({uid:u.id,templateId:template.id,dueAt:Timestamp.fromMillis(due),sent:false,attempts:0,createdAt:stamp()}); }
       catch(e) { if(e.code!==6) throw e; }
     }
   }
@@ -262,15 +284,15 @@ async function deliver(ref) {
       const t=await db.doc(`notifications/${queue.templateId}`).get();
       if(!t.exists || !t.data().isActive || t.data().targetRole!==u.data().role) { await ref.update({sent:true,error:"TEMPLATE_INACTIVE"}); return; }
       payload=t.data(); const due=u.data().createdAt.toMillis()+Number(payload.delayDays || 0)*86400000;
-      if(due>Date.now()) { await ref.update({dueAt:admin.firestore.Timestamp.fromMillis(due),leaseUntil:0}); return; }
+      if(due>Date.now()) { await ref.update({dueAt:Timestamp.fromMillis(due),leaseUntil:0}); return; }
     }
     const devices=await db.collection("_devices").where("uid","==",queue.uid).get();
-    if(devices.empty) { await ref.update({leaseUntil:0,dueAt:admin.firestore.Timestamp.fromMillis(Date.now()+3600000)}); return; }
+    if(devices.empty) { await ref.update({leaseUntil:0,dueAt:Timestamp.fromMillis(Date.now()+3600000)}); return; }
     const delivered=new Set(queue.deliveredDevices || []);
     for(const device of devices.docs) {
       if(delivered.has(device.id)) continue;
       try {
-        await admin.messaging().send({token:device.data().token,notification:{title:String(payload.title || "Bildirim"),body:String(payload.body || "")},data:{...(payload.data || {}),notificationId:ref.id},apns:{headers:{"apns-collapse-id":D.key(ref.id).slice(0,64)},payload:{aps:{sound:"default"}}}});
+        await getMessaging().send({token:device.data().token,notification:{title:String(payload.title || "Bildirim"),body:String(payload.body || "")},data:{...(payload.data || {}),notificationId:ref.id},apns:{headers:{"apns-collapse-id":D.key(ref.id).slice(0,64)},payload:{aps:{sound:"default"}}}});
         delivered.add(device.id); await ref.update({deliveredDevices:[...delivered]});
       } catch(e) {
         if(["messaging/registration-token-not-registered","messaging/invalid-registration-token"].includes(e.code)) {
@@ -281,6 +303,6 @@ async function deliver(ref) {
     await ref.update({sent:true,sentAt:stamp(),leaseUntil:0,deliveredDevices:[...delivered]});
   } catch(e) {
     const attempts=(queue.attempts || 0)+1;
-    await ref.update({leaseUntil:0,error:String(e.code || "SEND_FAILED"),dueAt:admin.firestore.Timestamp.fromMillis(Date.now()+Math.min(3600,2**Math.min(attempts,10)*30)*1000)});
+    await ref.update({leaseUntil:0,error:String(e.code || "SEND_FAILED"),dueAt:Timestamp.fromMillis(Date.now()+Math.min(3600,2**Math.min(attempts,10)*30)*1000)});
   }
 }

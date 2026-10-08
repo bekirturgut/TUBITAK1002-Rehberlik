@@ -25,6 +25,10 @@ extension Notification.Name {
     static let nativeTokenChanged = Notification.Name("nativeTokenChanged")
     static let nativeNotificationOpened = Notification.Name("nativeNotificationOpened")
 }
+final class NotificationInbox {
+    static let shared = NotificationInbox()
+    var pending: [AnyHashable: Any]?
+}
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         guard !ProcessInfo.processInfo.arguments.contains("-ui-testing") else { return true }
@@ -49,6 +53,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         completion([.banner,.sound,.badge])
     }
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completion: @escaping ()->Void) {
+        NotificationInbox.shared.pending=response.notification.request.content.userInfo
         NotificationCenter.default.post(name:.nativeNotificationOpened,object:nil,userInfo:response.notification.request.content.userInfo)
         completion()
     }

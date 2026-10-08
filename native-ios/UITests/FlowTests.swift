@@ -18,4 +18,19 @@ final class FlowTests:XCTestCase {
     func testLoginValidation() {
         let app=launch();XCTAssertTrue(app.buttons["login"].waitForExistence(timeout:10));XCTAssertFalse(app.buttons["login"].isEnabled)
     }
+    func testElderRoleAndAdminPanel() {
+        let app=launch()
+        XCTAssertTrue(app.segmentedControls["rolePicker"].waitForExistence(timeout:10))
+        app.segmentedControls["rolePicker"].buttons["Üst Kuşak"].tap()
+        login(app)
+        XCTAssertTrue(app.staticTexts["Üst Kuşak"].exists)
+        app.terminate();app.launch()
+        app.segmentedControls["rolePicker"].buttons["Admin"].tap()
+        let phone=app.textFields["phone"];phone.tap();phone.typeText("05321234567")
+        let password=app.secureTextFields["password"];password.tap();password.typeText("test-password")
+        app.buttons["login"].tap()
+        XCTAssertTrue(app.tabBars.buttons["Üyeler"].waitForExistence(timeout:10))
+        app.tabBars.buttons["SSS"].tap()
+        XCTAssertTrue(app.staticTexts["Destek nasıl alınır?"].waitForExistence(timeout:5))
+    }
 }
