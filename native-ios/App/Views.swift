@@ -15,12 +15,14 @@ struct RootView: View {
         .alert("İşlem tamamlanamadı",isPresented:Binding(get:{store.errorMessage != nil},set:{if !$0 {store.errorMessage=nil}})) {
             Button("Tamam",role:.cancel){store.errorMessage=nil}
         } message:{Text(store.errorMessage ?? "")}
-        .sheet(item:Binding(get:{store.notificationRoute.map{RouteID(id:$0)}},set:{store.notificationRoute=$0?.id})) { route in
-            NavigationStack { ChatView(userID:route.id).toolbar { ToolbarItem(placement:.cancellationAction){Button("Kapat"){store.notificationRoute=nil}} } }.environmentObject(store)
+        .sheet(item:$store.notificationRoute) { route in
+            NavigationStack {
+                Group {switch route {case .chat(let uid):ChatView(userID:uid);case .notifications:NotificationsView()}}
+                    .toolbar { ToolbarItem(placement:.cancellationAction){Button("Kapat"){store.notificationRoute=nil}} }
+            }.environmentObject(store)
         }
     }
 }
-struct RouteID:Identifiable { let id:String }
 struct LoginView:View {
     @EnvironmentObject var store:AppStore
     @State private var phone=""
@@ -116,7 +118,7 @@ struct NotificationsView:View {
         List {
             ForEach([true,false],id:\.self){arrived in
                 Section(arrived ? "Zamanı gelenler":"Yaklaşanlar") {
-                    let items=(store.records["notifications"] ?? []).filter{(due($0)<=now)==arrived}.sorted{due($0)<due($1)}
+                    let items=(store.records["notifications"] ?? []).filter{$0.active && $0.data["targetRole"] as? String == store.profile?.role.rawValue && (due($0)<=now)==arrived}.sorted{due($0)<due($1)}
                     if items.isEmpty {Text("Bildirim bulunmuyor.").foregroundStyle(.secondary)}
                     ForEach(items){item in VStack(alignment:.leading,spacing:8){Text(item.title).font(.headline);Text(item.body);Text(due(item),style:.date).font(.caption).foregroundStyle(.secondary)}}
                 }
@@ -151,6 +153,7 @@ struct QuizView:View {
         guard !busy,selected==nil,index<questions.count else {return}
         busy=true; failedOption=option
         let question=questions[index]
+        let uid=store.profile?.id
         Task {
             defer{busy=false}
             do {
@@ -158,6 +161,7 @@ struct QuizView:View {
                 let result:Bool
                 if store.demo {result=option==question.card.answer}
                 else {guard let value=response["isCorrect"] as? Bool else {throw DomainError.invalidResponse};result=value}
+                guard store.profile?.id==uid else {return}
                 selected=option; correct=result;failedOption=nil
                 if result {store.correctIDs.insert(question.id);store.wrongIDs.remove(question.id)}
                 else {store.wrongIDs.insert(question.id);store.correctIDs.remove(question.id)}

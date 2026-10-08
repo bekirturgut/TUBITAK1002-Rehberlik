@@ -1,5 +1,6 @@
 import XCTest
 final class FlowTests:XCTestCase {
+    override func setUp(){super.setUp();continueAfterFailure=false}
     func capture(_ app:XCUIApplication,_ name:String) {
         let attachment=XCTAttachment(screenshot:app.screenshot());attachment.name=name;attachment.lifetime = .keepAlways;add(attachment)
     }

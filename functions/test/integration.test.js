@@ -158,6 +158,21 @@ test("feedback retry is idempotent and cannot overwrite a submitted rating",asyn
   await assert.rejects(run("rateNativeAnswer","mother",{messageId:"bot_question",isSufficient:true}),{code:"failed-precondition"});
   assert.equal((await db.collection("admin_alerts").get()).size,1);
 });
+
+test("background bot and expert triggers recover disconnected clients without duplicate replies",async()=>{
+  await run("sendNativeMessage","mother",{messageId:"offline",text:"Need expert help"});
+  const source=await db.doc("chats/mother/messages/offline").get();
+  const event={params:{uid:"mother",id:"offline"},data:source};
+  await api.nativeUserMessageBot.run(event);await api.nativeUserMessageBot.run(event);
+  assert.equal((await db.collection("chats/mother/messages").get()).size,2);
+  const answerRef=db.doc("chats/mother/messages/expert-offline");
+  await answerRef.set({senderType:"admin",senderId:"admin",replyToMessageId:"offline",text:"Expert answer"});
+  const replyEvent={params:{uid:"mother",id:"expert-offline"},data:await answerRef.get()};
+  await api.nativeExpertReply.run(replyEvent);await api.nativeExpertReply.run(replyEvent);
+  assert.equal((await source.ref.get()).data().isAnswered,true);
+  assert.equal((await db.doc("chats/mother").get()).data().pendingAdminCount,0);
+  assert.equal((await db.collection("sendQueue").get()).size,1);
+});
 test("stale rendered quiz content is rejected without recording a wrong answer",async()=>{
   await db.doc("MotherLearnCard/c1").update({gercek:"Changed"});
   await assert.rejects(run("recordQuizAnswer","mother",{cardId:"c1",answer:"A1",question:"Q1",expectedAnswer:"A1",attemptId:"stale"}),{code:"failed-precondition"});

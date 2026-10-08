@@ -2,7 +2,7 @@
 
 TÜBİTAK projesinin anne, üst kuşak ve uzman deneyimleri için native iOS istemcisi **[native-ios/](native-ios/)** altında bulunur. SwiftUI, Firebase Apple SDK ve test edilebilir bir Swift çekirdeği kullanır; iOS uygulaması Flutter veya Dart çalışma zamanı içermez.
 
-Eski Flutter kaynakları Android sürümü ve geçiş referansı için korunmuştur. Eski kullanım belgesi: [Flutter referansı](docs/FLUTTER_REFERENCE.md).
+Eski Flutter kaynakları geçiş referansı için korunmuştur; yeni backend devreye alındığında eski Android istemcisinin de ayrıca uyarlanması gerekir. Eski kullanım belgesi: [Flutter referansı](docs/FLUTTER_REFERENCE.md).
 
 ## Kapsam
 

@@ -62,14 +62,17 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         NotificationCenter.default.post(name:.nativeTokenChanged,object:nil)
     }
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
-        NotificationCenter.default.post(name:.nativeTokenChanged,object:nil)
+        DispatchQueue.main.async { NotificationCenter.default.post(name:.nativeTokenChanged,object:nil) }
     }
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completion: @escaping (UNNotificationPresentationOptions)->Void) {
         completion([.banner,.sound,.badge])
     }
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completion: @escaping ()->Void) {
-        NotificationInbox.shared.pending=response.notification.request.content.userInfo
-        NotificationCenter.default.post(name:.nativeNotificationOpened,object:nil,userInfo:response.notification.request.content.userInfo)
+        let payload=response.notification.request.content.userInfo
+        DispatchQueue.main.async {
+            NotificationInbox.shared.pending=payload
+            NotificationCenter.default.post(name:.nativeNotificationOpened,object:nil,userInfo:payload)
+        }
         completion()
     }
 }

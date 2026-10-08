@@ -1,6 +1,6 @@
 # Native Swift / SwiftUI Rehberlik
 
-This directory is the native iOS replacement for the Flutter client. Flutter sources are retained as the migration reference and Android fallback. No Dart runtime is linked into this application.
+This directory is the native iOS replacement for the Flutter client. Flutter sources are retained as the migration reference; the new backend requires a coordinated cutover before any legacy Android client can share it. No Dart runtime is linked into this application.
 
 ## Build and test
 
@@ -14,7 +14,7 @@ xcodebuild test -project Rehberlik.xcodeproj -scheme Rehberlik -destination 'pla
 xcodebuild build -project Rehberlik.xcodeproj -scheme Rehberlik -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
 ```
 
-GitHub Actions performs core tests, app/unit/UI simulator tests, and an unsigned physical-device build. Unsigned artifacts cannot be installed on an iPhone. UI tests use explicit `-ui-testing` in-memory fixtures; production launches always use Firebase. These UI tests do not prove live backend connectivity.
+GitHub Actions performs core tests, app/unit/UI simulator tests, and an unsigned physical-device build. Unsigned artifacts cannot be installed on an iPhone. UI tests cover both `-ui-testing` in-memory fixtures and a debug-only `-emulator-testing` flow against isolated Auth, Firestore and Functions emulators: mother login, server-graded quiz, AI fallback, admin login/expert reply, and receipt by the mother account. The emulator flow is enabled by `RUN_FIREBASE_UI_TESTS=1` in CI. These tests do not prove production IAM, Gemini availability or APNs delivery.
 
 ## Feature mapping
 

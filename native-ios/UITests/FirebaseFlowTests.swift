@@ -1,6 +1,11 @@
 import XCTest
 
 final class FirebaseFlowTests:XCTestCase {
+    override func setUp(){super.setUp();continueAfterFailure=false}
+    func chatInput(_ app:XCUIApplication)->XCUIElement {
+        if app.textViews["chatDraft"].waitForExistence(timeout:2) {return app.textViews["chatDraft"]}
+        return app.textFields["chatDraft"]
+    }
     func authenticate(_ app:XCUIApplication,phone:String,role:String) {
         XCTAssertTrue(app.segmentedControls["rolePicker"].waitForExistence(timeout:20))
         app.segmentedControls["rolePicker"].buttons[role].tap()
@@ -22,7 +27,7 @@ final class FirebaseFlowTests:XCTestCase {
         XCTAssertTrue(app.staticTexts["Doğru cevap!"].waitForExistence(timeout:30))
         app.navigationBars.buttons.element(boundBy:0).tap()
         app.buttons["Danış"].tap()
-        let draft=app.textFields["chatDraft"];XCTAssertTrue(draft.waitForExistence(timeout:10));draft.tap();draft.typeText("Uzman desteği istiyorum")
+        let draft=chatInput(app);XCTAssertTrue(draft.waitForExistence(timeout:10));draft.tap();draft.typeText("Uzman desteği istiyorum")
         app.buttons["chatSend"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format:"label CONTAINS %@","Sorunuzu uzman desteğine yönlendirdim")).firstMatch.waitForExistence(timeout:60))
         app.terminate();app.launch()
@@ -30,7 +35,7 @@ final class FirebaseFlowTests:XCTestCase {
         XCTAssertTrue(app.buttons["user-mother"].waitForExistence(timeout:60));app.buttons["user-mother"].tap()
         app.buttons["userChat"].tap()
         XCTAssertTrue(app.buttons["Bu soruyu yanıtla"].firstMatch.waitForExistence(timeout:20));app.buttons["Bu soruyu yanıtla"].firstMatch.tap()
-        let expertDraft=app.textFields["chatDraft"];expertDraft.tap();expertDraft.typeText("Uzman test yanıtı")
+        let expertDraft=chatInput(app);expertDraft.tap();expertDraft.typeText("Uzman test yanıtı")
         app.buttons["chatSend"].tap()
         XCTAssertTrue(app.staticTexts["Uzman yanıtladı"].firstMatch.waitForExistence(timeout:30))
         app.terminate();app.launch()

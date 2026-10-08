@@ -43,3 +43,7 @@ struct ChatMessage: Identifiable {
 }
 struct HistoryEntry: Identifiable { let id: String; let date: Date }
 struct ChatSummary: Identifiable { let id: String; let pendingCount: Int }
+enum NotificationRoute:Identifiable {
+    case chat(String),notifications
+    var id:String {switch self {case .chat(let uid):return "chat-\(uid)";case .notifications:return "notifications"}}
+}

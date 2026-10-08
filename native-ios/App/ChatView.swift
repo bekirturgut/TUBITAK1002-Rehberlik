@@ -13,25 +13,28 @@ final class ChatModel:ObservableObject {
     private var listener:ListenerRegistration?
     private var pendingID:String?
     private var pendingText:String?
-    private var active=true
+    private var pendingReplyID:String?
+    private var generation=UUID()
     func start(store:AppStore,uid:String) {
-        stop();active=true
+        stop();let epoch=generation
+        messages=[];loading=true;error=nil;replyingTo=nil;retryBotID=nil
+        pendingID=nil;pendingText=nil;pendingReplyID=nil
         if store.demo {messages=[];loading=false;return}
         listener=store.db.collection("chats").document(uid).collection("messages").order(by:"createdAt",descending:true).limit(to:300).addSnapshotListener{[weak self] snap,error in
-            Task{@MainActor in guard let self,self.active else{return};self.loading=false
+            Task{@MainActor in guard let self,self.generation==epoch else{return};self.loading=false
                 if let error {self.error=error.localizedDescription;return}
                 self.messages=(snap?.documents ?? []).reversed().map{ChatMessage(id:$0.documentID,data:$0.data())}
             }
         }
     }
-    func stop(){active=false;listener?.remove();listener=nil}
+    func stop(){generation=UUID();listener?.remove();listener=nil}
     deinit{listener?.remove()}
     func send(store:AppStore,uid:String) async {
         guard !busy else{return}
         let text=draft.trimmingCharacters(in:.whitespacesAndNewlines)
         guard !text.isEmpty,text.count<=2000 else{error="Mesaj 1–2000 karakter olmalıdır.";return}
         guard store.profile?.role != .admin || replyingTo != nil else{error="Önce cevaplayacağınız soruyu seçiniz.";return}
-        if pendingText != text {pendingID=UUID().uuidString;pendingText=text}
+        if pendingText != text || pendingReplyID != replyingTo?.id {pendingID=UUID().uuidString;pendingText=text;pendingReplyID=replyingTo?.id}
         let id=pendingID ?? UUID().uuidString
         busy=true;defer{busy=false}
         do {

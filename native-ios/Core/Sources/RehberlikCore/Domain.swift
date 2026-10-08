@@ -36,7 +36,8 @@ public struct LearningCard: Identifiable, Equatable, Sendable {
     public let startWeek: Int
     public let active: Bool
     public init(id: String, question: String, answer: String, startWeek: Int = 1, active: Bool = true) {
-        self.id = id; self.question = question; self.answer = answer; self.startWeek = startWeek; self.active = active
+        self.id = id; self.question = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.answer = answer.trimmingCharacters(in: .whitespacesAndNewlines); self.startWeek = startWeek; self.active = active
     }
 }
 public struct QuizQuestion: Identifiable, Equatable, Sendable {

@@ -17,7 +17,7 @@ final class AppStore: ObservableObject {
     @Published var correctIDs: Set<String> = []
     @Published var wrongIDs: Set<String> = []
     @Published var chats: [ChatSummary] = []
-    @Published var notificationRoute: String?
+    @Published var notificationRoute: NotificationRoute?
     private var started=false
     private var authHandle: AuthStateDidChangeListenerHandle?
     private var profileListener: ListenerRegistration?
@@ -162,7 +162,9 @@ final class AppStore: ObservableObject {
     func openNotification(_ data:[AnyHashable:Any]?) {
         guard let profile,let uid=data?["userId"] as? String else { return }
         NotificationInbox.shared.pending=nil
-        if profile.role == .admin || profile.id==uid { notificationRoute=uid }
+        guard profile.role == .admin || profile.id==uid else {return}
+        if data?["type"] as? String == "template" {notificationRoute = .notifications}
+        else {notificationRoute = .chat(uid)}
     }
     func saveContent(collection:String,id:String?,creationID:String,createdAt:Date,data:[String:Any]) async throws {
         guard !demo else { return }

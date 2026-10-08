@@ -94,7 +94,7 @@ exports.deleteNativeUser = callable(async req => {
   const ref=db.doc(`users/${uid}`);
   const snap=await db.runTransaction(async tx=>{
     const [target,currentActor]=await Promise.all([tx.get(ref),tx.get(db.doc(`users/${actor.id}`))]);
-    if(!currentActor.exists || currentActor.data().disabled || currentActor.data().deleting || currentActor.data().role!=="Admin") throw new HttpsError("permission-denied","Uzman hesabı değişti.");
+    if(!currentActor.exists || currentActor.data().disabled || currentActor.data().deleting || currentActor.data().role!=="Admin" || Number(currentActor.data().sessionVersion || 0)!==Number(actor.sessionVersion || 0)) throw new HttpsError("permission-denied","Uzman hesabı değişti.");
     if(!target.exists) return null;
     tx.update(ref,{deleting:true,disabled:true,fcmToken:FieldValue.delete()});return target;
   });
@@ -122,7 +122,7 @@ exports.recordQuizAnswer = callable(async req => {
       if(attempt.data().cardId!==cardID || attempt.data().answer!==answer) throw new HttpsError("already-exists","Deneme kimliği başka bir cevap için kullanıldı.");
       return attempt.data().result;
     }
-    if(!current.exists || current.data().disabled || current.data().deleting || current.data().role!==profile.role) throw new HttpsError("permission-denied","Hesap değişti.");
+    if(!current.exists || current.data().disabled || current.data().deleting || current.data().role!==profile.role || Number(current.data().sessionVersion || 0)!==Number(profile.sessionVersion || 0)) throw new HttpsError("permission-denied","Hesap değişti.");
     const valid=D.eligible(cards.docs.map(d=>({id:d.id,...d.data()})),D.week(current.data().createdAt));
     if(!card.exists || !D.eligible([{id:card.id,...card.data()}],D.week(current.data().createdAt)).length) throw new HttpsError("failed-precondition","Kart değişti.");
     if(req.data.question !== undefined && (req.data.question!==String(card.data().bilinen).trim() || req.data.expectedAnswer!==String(card.data().gercek).trim())) throw new HttpsError("failed-precondition","Kart güncellendi. Mod seçimine dönüp soruları yeniden açınız.");
@@ -268,7 +268,7 @@ exports.updateNativeDevice = callable(async req=>{
   const token=req.data?.token ? input(()=>D.text(req.data.token,"Token",4096)):null;
   await db.runTransaction(async tx=>{
     const ref=db.doc(`_devices/${installation}`); const [old,current]=await Promise.all([tx.get(ref),tx.get(db.doc(`users/${actor.id}`))]);
-    if(!current.exists || current.data().disabled || current.data().deleting) throw new HttpsError("permission-denied","Hesap kapalı.");
+    if(!current.exists || current.data().disabled || current.data().deleting || Number(current.data().sessionVersion || 0)!==Number(actor.sessionVersion || 0)) throw new HttpsError("permission-denied","Hesap kapalı.");
     if(!token && old.data()?.uid!==actor.id) return;
     if(token) tx.set(ref,{uid:actor.id,token,updatedAt:stamp()}); else tx.delete(ref);
   }); return {success:true};
@@ -339,7 +339,7 @@ async function deliver(ref) {
     for(const device of devices.docs) {
       if(delivered.has(device.id)) continue;
       try {
-        await getMessaging().send({token:device.data().token,notification:{title:String(payload.title || "Bildirim"),body:String(payload.body || "")},data:{...(payload.data || {}),notificationId:ref.id},apns:{headers:{"apns-collapse-id":D.key(ref.id).slice(0,64)},payload:{aps:{sound:"default"}}}});
+        await getMessaging().send({token:device.data().token,notification:{title:String(payload.title || "Bildirim"),body:String(payload.body || "")},data:{...(payload.data || {}),...(queue.templateId?{type:"template",templateId:String(queue.templateId),userId:queue.uid}:{}),notificationId:ref.id},apns:{headers:{"apns-collapse-id":D.key(ref.id).slice(0,64)},payload:{aps:{sound:"default"}}}});
         delivered.add(device.id); await ref.update({deliveredDevices:[...delivered]});
       } catch(e) {
         if(["messaging/registration-token-not-registered","messaging/invalid-registration-token"].includes(e.code)) {

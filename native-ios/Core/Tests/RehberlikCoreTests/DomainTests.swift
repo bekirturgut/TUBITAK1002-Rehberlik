@@ -28,6 +28,13 @@ final class DomainTests: XCTestCase {
         var random=SystemRandomNumberGenerator()
         XCTAssertThrowsError(try LearningPolicy.questions((1...4).map { LearningCard(id:"\($0)",question:"S",answer:"same") },using:&random))
     }
+    func testLegacyWhitespaceIsNormalizedLikeServerGrading() {
+        let card=LearningCard(id:"legacy",question:" Soru \n",answer:" Cevap \n")
+        XCTAssertEqual(card.question,"Soru");XCTAssertEqual(card.answer,"Cevap")
+        var random=SystemRandomNumberGenerator()
+        let cards=["same"," same","same ","\nsame"].enumerated().map {LearningCard(id:String($0.offset),question:"Q",answer:$0.element)}
+        XCTAssertThrowsError(try LearningPolicy.questions(cards,using:&random))
+    }
     func testStatsExcludeDeletedCardsAndFloorThresholds() {
         let cards=(1...201).map { LearningCard(id:"\($0)",question:"S",answer:"C") }
         let summary=QuizSummary(cards:cards,correct:Set((1...50).map(String.init)+["deleted"]),wrong:["1","51","deleted"])
