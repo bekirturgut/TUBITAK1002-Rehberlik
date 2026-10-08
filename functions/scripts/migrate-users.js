@@ -19,7 +19,7 @@ async function main() {
       const {promisify}=require("node:util"),crypto=require("node:crypto");
       credential.hash=(await promisify(crypto.scrypt)(data.password,credential.salt,64)).toString("hex");
     }
-    plans.push({ref:doc.ref,phone,credential});
+    plans.push({ref:doc.ref,phone,credential,version:doc.updateTime});
   }
   console.log(`${plans.length} users validated. Mode: ${apply ? "APPLY":"DRY RUN"}.`);
   if(!apply) return;
@@ -27,6 +27,7 @@ async function main() {
     await db.runTransaction(async tx=>{
       const [latest,mapping]=await Promise.all([tx.get(p.ref),tx.get(db.doc(`_phoneLogins/${D.key(p.phone)}`))]);
       if(!latest.exists) throw new Error("User disappeared; rerun migration.");
+      if(!latest.updateTime.isEqual(p.version)) throw new Error("Profile changed during migration; stopped. Rerun after freezing writes.");
       if(mapping.exists && mapping.data().uid!==p.ref.id) throw new Error("Phone index conflict; stopped.");
       if(D.phone(latest.data().phone)!==p.phone) throw new Error("Profile changed; stopped.");
       tx.set(db.doc(`_phoneLogins/${D.key(p.phone)}`),{uid:p.ref.id});

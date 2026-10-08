@@ -31,6 +31,7 @@ async function user(req, adminOnly = false) {
   if (!req.auth) throw new HttpsError("unauthenticated", "Oturum açınız.");
   const doc = await db.doc(`users/${req.auth.uid}`).get();
   if (!doc.exists || doc.data().disabled || doc.data().deleting) throw new HttpsError("permission-denied", "Hesap kullanıma kapalı.");
+  if (Number(req.auth.token?.sessionVersion || 0) !== Number(doc.data().sessionVersion || 0)) throw new HttpsError("unauthenticated", "Hesap bilgileri değişti. Yeniden giriş yapınız.");
   if (adminOnly && doc.data().role !== "Admin") throw new HttpsError("permission-denied", "Uzman yetkisi gerekiyor.");
   return { ...doc.data(), id: doc.id };
 }
@@ -54,7 +55,7 @@ exports.loginWithPhone = callable(async req => {
   if (!await D.verifyPassword(req.data?.password, credential)) throw new HttpsError("unauthenticated", "Telefon veya şifre hatalı.");
   const profile = await db.doc(`users/${uid}`).get();
   if (!profile.exists || profile.data().disabled || profile.data().deleting || req.data.role !== profile.data().role) throw new HttpsError("unauthenticated", "Telefon, şifre veya rol hatalı.");
-  const token = await getAuth().createCustomToken(uid);
+  const token = await getAuth().createCustomToken(uid,{sessionVersion:Number(profile.data().sessionVersion || 0)});
   await db.collection(`users/${uid}/loginHistory`).add({ createdAt: stamp() });
   return { token };
 });
@@ -69,14 +70,16 @@ exports.saveNativeUser = callable(async req => {
   const credential = data.password ? await inputAsync(() => D.hashPassword(data.password)) : null;
   const ref=db.doc(`users/${uid}`), mapRef=db.doc(`_phoneLogins/${D.key(phone)}`);
   await db.runTransaction(async tx => {
-    const [old, mapping] = await Promise.all([tx.get(ref),tx.get(mapRef)]);
+    const [old, mapping, currentActor] = await Promise.all([tx.get(ref),tx.get(mapRef),tx.get(db.doc(`users/${actor.id}`))]);
+    if(!currentActor.exists || currentActor.data().disabled || currentActor.data().deleting || currentActor.data().role!=="Admin" || Number(currentActor.data().sessionVersion || 0)!==Number(actor.sessionVersion || 0)) throw new HttpsError("permission-denied","Uzman hesabı değişti.");
     if (old.data()?.deleting) throw new HttpsError("failed-precondition","Hesap siliniyor.");
     if (mapping.exists && mapping.data().uid !== uid) throw new HttpsError("already-exists","Telefon başka bir kullanıcıya ait.");
     if (!old.exists && !credential) throw new HttpsError("invalid-argument","Yeni kullanıcı için şifre gerekiyor.");
     const oldPhone=old.data()?.phone;
     if (oldPhone && oldPhone !== phone) tx.delete(db.doc(`_phoneLogins/${D.key(D.phone(oldPhone))}`));
     tx.set(mapRef,{uid});
-    tx.set(ref,{name,surname,phone,role:data.role,disabled:data.disabled === true,updatedAt:stamp(),...(!old.exists ? {createdAt:stamp()} : {})},{merge:true});
+    const changedAuth=credential || old.data()?.role!==data.role || old.data()?.disabled!==(data.disabled===true) || old.data()?.phone!==phone;
+    tx.set(ref,{name,surname,phone,role:data.role,disabled:data.disabled === true,sessionVersion:Number(old.data()?.sessionVersion || 0)+(changedAuth?1:0),updatedAt:stamp(),...(!old.exists ? {createdAt:stamp()} : {})},{merge:true});
     if(credential) tx.set(db.doc(`_credentials/${uid}`),credential);
   });
   if (credential || data.disabled) { try { await getAuth().revokeRefreshTokens(uid); } catch(e) { if(e.code !== "auth/user-not-found") throw e; } }
@@ -85,14 +88,20 @@ exports.saveNativeUser = callable(async req => {
 exports.deleteNativeUser = callable(async req => {
   const actor=await user(req,true); const uid=input(()=>D.id(req.data?.id));
   if(actor.id===uid) throw new HttpsError("failed-precondition","Kendi hesabınızı silemezsiniz.");
-  const ref=db.doc(`users/${uid}`); const snap=await ref.get(); if(!snap.exists) return {success:true};
-  await ref.update({deleting:true,disabled:true,fcmToken:FieldValue.delete()});
+  const ref=db.doc(`users/${uid}`);
+  const snap=await db.runTransaction(async tx=>{
+    const [target,currentActor]=await Promise.all([tx.get(ref),tx.get(db.doc(`users/${actor.id}`))]);
+    if(!currentActor.exists || currentActor.data().disabled || currentActor.data().deleting || currentActor.data().role!=="Admin") throw new HttpsError("permission-denied","Uzman hesabı değişti.");
+    if(!target.exists) return null;
+    tx.update(ref,{deleting:true,disabled:true,fcmToken:FieldValue.delete()});return target;
+  });
+  if(!snap) return {success:true};
   if(snap.data().phone) await db.doc(`_phoneLogins/${D.key(D.phone(snap.data().phone))}`).delete();
   await db.doc(`_credentials/${uid}`).delete();
   try { await getAuth().deleteUser(uid); } catch(e) { if(e.code!=="auth/user-not-found") throw e; }
-  for(const col of ["sendQueue","admin_alerts"]) {
+  for(const col of ["sendQueue","admin_alerts","_botJobs","_devices"]) {
     while(true) {
-      const rows=await db.collection(col).where(col==="sendQueue"?"uid":"userId","==",uid).limit(200).get(); if(rows.empty) break;
+      const rows=await db.collection(col).where(col==="admin_alerts"?"userId":"uid","==",uid).limit(200).get(); if(rows.empty) break;
       const batch=db.batch(); rows.docs.forEach(d=>batch.delete(d.ref)); await batch.commit();
     }
   }
@@ -100,6 +109,7 @@ exports.deleteNativeUser = callable(async req => {
 });
 exports.recordQuizAnswer = callable(async req => {
   const profile=await user(req); const collection=input(()=>D.collection(profile.role));
+  await limit(`quiz:${profile.id}`,120,60);
   const cardID=input(()=>D.id(req.data?.cardId)); const answer=input(()=>D.text(req.data?.answer,"Cevap",10000));
   const attemptID=input(()=>D.id(req.data?.attemptId)); const ref=db.doc(`users/${profile.id}`);
   return db.runTransaction(async tx => {
@@ -112,6 +122,7 @@ exports.recordQuizAnswer = callable(async req => {
     if(!current.exists || current.data().disabled || current.data().deleting || current.data().role!==profile.role) throw new HttpsError("permission-denied","Hesap değişti.");
     const valid=D.eligible(cards.docs.map(d=>({id:d.id,...d.data()})),D.week(current.data().createdAt));
     if(!card.exists || !D.eligible([{id:card.id,...card.data()}],D.week(current.data().createdAt)).length) throw new HttpsError("failed-precondition","Kart değişti.");
+    if(req.data.question !== undefined && (req.data.question!==String(card.data().bilinen).trim() || req.data.expectedAnswer!==String(card.data().gercek).trim())) throw new HttpsError("failed-precondition","Kart güncellendi. Mod seçimine dönüp soruları yeniden açınız.");
     const isCorrect=answer===String(card.data().gercek).trim();
     const correctIDs=correct.docs.filter(d=>d.data().collectionName===collection).map(d=>d.data().cardId).filter(x=>x!==cardID);
     const wrongIDs=wrong.docs.filter(d=>d.data().collectionName===collection).map(d=>d.data().cardId).filter(x=>x!==cardID);
@@ -136,7 +147,8 @@ async function syncPending(uid) {
 async function escalate(uid,messageID,question,score=0) {
   const msg=db.doc(`chats/${uid}/messages/${messageID}`), alert=db.doc(`admin_alerts/${uid}_${messageID}`);
   await db.runTransaction(async tx=>{
-    const [snap,old]=await Promise.all([tx.get(msg),tx.get(alert)]);
+    const [snap,old,profile]=await Promise.all([tx.get(msg),tx.get(alert),tx.get(db.doc(`users/${uid}`))]);
+    if(!profile.exists || profile.data().disabled || profile.data().deleting) throw new HttpsError("permission-denied","Hesap kapalı.");
     if(!snap.exists || snap.data().senderType!=="user") throw new HttpsError("not-found","Soru bulunamadı.");
     if(snap.data().isAnswered) return;
     tx.update(msg,{needsAdminReply:true,escalated:true,escalatedAt:stamp(),score});
@@ -152,7 +164,8 @@ exports.sendNativeMessage = callable(async req=>{
   const replyID=actor.role==="Admin" ? input(()=>D.id(req.data?.replyToMessageId)):null;
   if(replyID) { const reply=await db.doc(`chats/${uid}/messages/${replyID}`).get(); if(!reply.exists || reply.data().senderType!=="user") throw new HttpsError("invalid-argument","Cevaplanacak soruyu seçiniz."); }
   await db.runTransaction(async tx=>{
-    const old=await tx.get(ref);
+    const [old,currentTarget,currentActor]=await Promise.all([tx.get(ref),tx.get(db.doc(`users/${uid}`)),tx.get(db.doc(`users/${actor.id}`))]);
+    if(!currentTarget.exists || currentTarget.data().disabled || currentTarget.data().deleting || !currentActor.exists || currentActor.data().disabled || currentActor.data().deleting || currentActor.data().role!==actor.role || currentActor.data().sessionVersion!==actor.sessionVersion) throw new HttpsError("permission-denied","Hesap değişti.");
     if(old.exists) { if(old.data().text!==text || old.data().senderId!==actor.id) throw new HttpsError("already-exists","Mesaj kimliği kullanımda."); return; }
     tx.set(ref,{text,senderType:actor.role==="Admin"?"admin":"user",senderId:actor.id,senderRole:actor.role,createdAt:stamp(),needsAdminReply:false,isAnswered:false,...(replyID ? {replyToMessageId:replyID}:{})});
     tx.set(db.doc(`chats/${uid}`),{userId:uid,updatedAt:stamp()},{merge:true});
@@ -174,6 +187,7 @@ async function processQuestion(uid,messageID) {
   if(!acquired) return {success:true,processing:true};
   let answer, score=0, matches=[], needsFeedback=false;
   try {
+    await limit(`bot-generation:${uid}`,20,3600);
     const model=ai(); const embed=await model.models.embedContent({model:"gemini-embedding-001",contents:question,config:{outputDimensionality:768}});
     const faq=await db.collection("faq_items").where("isActive","==",true).get();
     const ranked=faq.docs.map(d=>({id:d.id,...d.data(),score:D.cosine(embed.embeddings[0].values,d.data().embedding)})).filter(x=>x.answer).sort((a,b)=>b.score-a.score);
@@ -188,8 +202,11 @@ async function processQuestion(uid,messageID) {
   } catch(e) { console.warn("FAQ lookup fallback",e.name); }
   const escalated=!matches.length;
   if(escalated) { answer="Sorunuzu uzman desteğine yönlendirdim. Uzman yanıtı bu sohbette görünecek."; await escalate(uid,messageID,question,score); }
-  try { await botRef.create({text:answer,senderType:"bot",senderId:"chatbot",createdAt:stamp(),sourceMessageId:messageID,relatedQuestion:question,score,needsFeedback,feedbackGiven:false,escalated,matchedDocIds:matches.map(x=>x.id)}); }
-  catch(e) { if(e.code!==6) throw e; }
+  await db.runTransaction(async tx=>{
+    const [profile,source,existing]=await Promise.all([tx.get(db.doc(`users/${uid}`)),tx.get(questionDoc.ref),tx.get(botRef)]);
+    if(existing.exists || !profile.exists || profile.data().disabled || profile.data().deleting || !source.exists) return;
+    tx.set(botRef,{text:answer,senderType:"bot",senderId:"chatbot",createdAt:stamp(),sourceMessageId:messageID,relatedQuestion:question,score,needsFeedback,feedbackGiven:false,escalated,matchedDocIds:matches.map(x=>x.id)});
+  });
   await jobRef.delete();
   return {success:true};
 }
@@ -221,17 +238,25 @@ exports.rateNativeAnswer = callable(async req=>{
 async function resolveReply(uid,messageID) {
   const message=await db.doc(`chats/${uid}/messages/${messageID}`).get(); const data=message.data();
   if(!data || data.senderType!=="admin" || !data.replyToMessageId) return;
-  const batch=db.batch();
-  batch.update(db.doc(`chats/${uid}/messages/${data.replyToMessageId}`),{needsAdminReply:false,isAnswered:true,answeredAt:stamp(),answeredBy:data.senderId,answerMessageId:messageID,answerText:data.text});
-  batch.set(db.doc(`admin_alerts/${uid}_${data.replyToMessageId}`),{status:"resolved",resolvedAt:stamp(),userId:uid,sourceMessageId:data.replyToMessageId},{merge:true});
-  await batch.commit(); await syncPending(uid);
+  const resolved=await db.runTransaction(async tx=>{
+    const questionRef=db.doc(`chats/${uid}/messages/${data.replyToMessageId}`);
+    const [profile,question]=await Promise.all([tx.get(db.doc(`users/${uid}`)),tx.get(questionRef)]);
+    if(!profile.exists || profile.data().deleting || !question.exists) return false;
+    // A retry of an older answer cannot replace a newer expert answer.
+    if(question.data().isAnswered && question.data().answerMessageId!==messageID) return false;
+    tx.update(questionRef,{needsAdminReply:false,isAnswered:true,answeredAt:stamp(),answeredBy:data.senderId,answerMessageId:messageID,answerText:data.text});
+    tx.set(db.doc(`admin_alerts/${uid}_${data.replyToMessageId}`),{status:"resolved",resolvedAt:stamp(),userId:uid,sourceMessageId:data.replyToMessageId},{merge:true});return true;
+  });
+  if(!resolved)return;
+  await syncPending(uid);
   await enqueuePush(`reply_${uid}_${messageID}`,uid,{title:"Uzman yanıtladı",body:"Sorunuza yeni bir yanıt geldi.",data:{type:"admin_reply",userId:uid}});
 }
 exports.updateNativeDevice = callable(async req=>{
   const actor=await user(req); const installation=input(()=>D.id(req.data?.installationId));
   const token=req.data?.token ? input(()=>D.text(req.data.token,"Token",4096)):null;
   await db.runTransaction(async tx=>{
-    const ref=db.doc(`_devices/${installation}`); const old=await tx.get(ref);
+    const ref=db.doc(`_devices/${installation}`); const [old,current]=await Promise.all([tx.get(ref),tx.get(db.doc(`users/${actor.id}`))]);
+    if(!current.exists || current.data().disabled || current.data().deleting) throw new HttpsError("permission-denied","Hesap kapalı.");
     if(!token && old.data()?.uid!==actor.id) return;
     if(token) tx.set(ref,{uid:actor.id,token,updatedAt:stamp()}); else tx.delete(ref);
   }); return {success:true};
@@ -255,8 +280,14 @@ exports.nativeAdminAlertPush = onDocumentWritten("admin_alerts/{id}",async event
   const admins=await db.collection("users").where("role","==","Admin").get();
   for(const doc of admins.docs) if(!doc.data().disabled) await enqueuePush(`alert_${event.params.id}_${doc.id}`,doc.id,{title:"Yeni uzman destek talebi",body:"Yanıt bekleyen bir kullanıcı sorusu var.",data:{type:"admin_alert",userId:after.data().userId}});
 });
-exports.sendDueNotifications = onSchedule({schedule:"every 1 minutes",timeZone:"Europe/Istanbul",timeoutSeconds:540},async()=>{
+exports.sendDueNotifications = onSchedule({schedule:"every 1 minutes",timeZone:"Europe/Istanbul",timeoutSeconds:540,secrets:[geminiKey]},async()=>{
   const now=Timestamp.now(); const templates=await db.collection("notifications").where("isActive","==",true).get();
+  const abandoned=await db.collection("_botJobs").where("leaseUntil","<=",Date.now()).limit(20).get();
+  for(const job of abandoned.docs) {
+    const profile=await db.doc(`users/${job.data().uid}`).get();
+    if(!profile.exists || profile.data().disabled || profile.data().deleting) {await job.ref.delete();continue;}
+    await processQuestion(job.data().uid,job.data().messageID);
+  }
   for(const template of templates.docs) {
     const t=template.data(); if(!D.ROLES.includes(t.targetRole)) continue;
     const users=await db.collection("users").where("role","==",t.targetRole).get();

@@ -4,7 +4,8 @@ service cloud.firestore {
     function active() {
       return request.auth != null && exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('disabled', false) == false
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('deleting', false) == false;
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('deleting', false) == false
+        && request.auth.token.get('sessionVersion', 0) == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('sessionVersion', 0);
     }
     function admin() { return active() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin'; }
     function owner(uid) { return active() && request.auth.uid == uid; }

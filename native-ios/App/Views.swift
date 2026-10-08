@@ -151,7 +151,7 @@ struct QuizView:View {
         Task {
             defer{busy=false}
             do {
-                let response=try await store.call("recordQuizAnswer",["cardId":question.id,"answer":option,"attemptId":attemptID])
+                let response=try await store.call("recordQuizAnswer",["cardId":question.id,"answer":option,"attemptId":attemptID,"question":question.card.question,"expectedAnswer":question.card.answer])
                 let result:Bool
                 if store.demo {result=option==question.card.answer}
                 else {guard let value=response["isCorrect"] as? Bool else {throw DomainError.invalidResponse};result=value}

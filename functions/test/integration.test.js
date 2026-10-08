@@ -7,6 +7,7 @@ if(!process.env.FIRESTORE_EMULATOR_HOST) throw new Error("Integration tests requ
 process.env.GCLOUD_PROJECT="demo-rehberlik";
 const api=require("../native-api");
 const {getFirestore,Timestamp}=require("firebase-admin/firestore");const {getApp,deleteApp}=require("firebase-admin/app");
+const D=require("../domain");
 const db=getFirestore();
 let env;
 const request=(uid,data)=>({auth:uid?{uid,token:{}}:undefined,data,rawRequest:{ip:"127.0.0.1"}});
@@ -107,4 +108,35 @@ test("duplicate normalized phones rejected and new users have private hashed cre
   assert.equal((await db.doc(`users/${result.id}`).get()).data().password,undefined);
   assert.equal((await db.doc(`_credentials/${result.id}`).get()).exists,true);
   await assert.rejects(run("saveNativeUser","admin",{...data,phone:"05321234560"}),{code:"already-exists"});
+});
+test("password and role changes invalidate existing ID tokens immediately",async()=>{
+  await run("saveNativeUser","admin",{id:"mother",name:"Test",surname:"User",phone:"+905321234567",password:"updated-password",role:"Anne"});
+  await assert.rejects(run("recordQuizAnswer","mother",{cardId:"c1",answer:"A1",attemptId:"stale-session"}),{code:"unauthenticated"});
+  await assertFails(getDoc(doc(env.authenticatedContext("mother").firestore(),"users/mother")));
+  const version=(await db.doc("users/mother").get()).data().sessionVersion;
+  await assertSucceeds(getDoc(doc(env.authenticatedContext("mother",{sessionVersion:version}).firestore(),"users/mother")));
+});
+test("valid credentials return a custom token; wrong credentials have generic errors",async()=>{
+  await db.doc("_credentials/mother").set(await D.hashPassword("valid-password"));
+  await db.doc(`_phoneLogins/${D.key("+905321234567")}`).set({uid:"mother"});
+  const result=await run("loginWithPhone",null,{phone:"05321234567",password:"valid-password",role:"Anne"});
+  assert.equal(typeof result.token,"string");
+  await assert.rejects(run("loginWithPhone",null,{phone:"05321234567",password:"wrong-password",role:"Anne"}),{code:"unauthenticated"});
+  await assert.rejects(run("loginWithPhone",null,{phone:"05321234567",password:"valid-password",role:"Admin"}),{code:"unauthenticated"});
+});
+test("account deletion cleans nested progress, messages, jobs and delivery queue",async()=>{
+  await db.doc("users/mother/wrongCards/card").set({cardId:"c1"});
+  await db.doc("chats/mother/messages/message").set({text:"Q"});
+  await db.doc("sendQueue/queue").set({uid:"mother"});await db.doc("admin_alerts/alert").set({userId:"mother"});
+  await db.doc("_botJobs/job").set({uid:"mother"});
+  await db.doc("_devices/device").set({uid:"mother",token:"private-token"});
+  await run("deleteNativeUser","admin",{id:"mother"});
+  for(const path of ["users/mother","users/mother/wrongCards/card","chats/mother/messages/message","sendQueue/queue","admin_alerts/alert","_botJobs/job","_devices/device"]) assert.equal((await db.doc(path).get()).exists,false,path);
+});
+test("template queue preserves sent state across repeated schedule and token changes",async()=>{
+  await db.doc("notifications/template").set({targetRole:"Anne",title:"Title",body:"Body",delayDays:0,isActive:true});
+  await api.sendDueNotifications.run({});
+  const ref=db.doc("sendQueue/template_mother_template");assert.equal((await ref.get()).exists,true);
+  await ref.update({sent:true});await db.doc("users/mother").update({fcmToken:"new-token"});
+  await api.sendDueNotifications.run({});assert.equal((await ref.get()).data().sent,true);
 });

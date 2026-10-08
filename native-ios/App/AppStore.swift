@@ -53,7 +53,11 @@ final class AppStore: ObservableObject {
         profileListener=db.collection("users").document(uid).addSnapshotListener { [weak self] snap,error in
             Task { @MainActor in
                 guard let self,Auth.auth().currentUser?.uid==uid else { return }
-                if let error { self.errorMessage=error.localizedDescription; self.loading=false; return }
+                if let error {
+                    self.errorMessage=error.localizedDescription; self.loading=false
+                    if (error as NSError).code == FirestoreErrorCode.permissionDenied.rawValue { await self.logout() }
+                    return
+                }
                 do {
                     guard let snap,snap.exists else { throw DomainError.invalidProfile }
                     let next=try UserProfile(id:uid,data:snap.data() ?? [:])
@@ -156,11 +160,11 @@ final class AppStore: ObservableObject {
         NotificationInbox.shared.pending=nil
         if profile.role == .admin || profile.id==uid { notificationRoute=uid }
     }
-    func saveContent(collection:String,id:String?,data:[String:Any]) async throws {
+    func saveContent(collection:String,id:String?,creationID:String,createdAt:Date,data:[String:Any]) async throws {
         guard !demo else { return }
         var values=data; values["updatedAt"]=FieldValue.serverTimestamp()
         if let id { try await db.collection(collection).document(id).updateData(values) }
-        else { values["createdAt"]=FieldValue.serverTimestamp(); _=try await db.collection(collection).addDocument(data:values) }
+        else { values["createdAt"]=Timestamp(date:createdAt); try await db.collection(collection).document(creationID).setData(values) }
     }
     func deleteContent(_ item:ContentRecord) async throws { if !demo { try await db.collection(item.collection).document(item.id).delete() } }
     func loadDemo(role:UserRole) {

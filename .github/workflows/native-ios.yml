@@ -45,13 +45,29 @@ jobs:
           brew install xcodegen
           cd native-ios
           xcodegen generate
+      - uses: actions/cache/restore@v4
+        id: xcode-cache
+        with:
+          path: native-ios/DerivedData
+          key: native-ios-${{ runner.os }}-${{ runner.arch }}-xcode16.4-${{ hashFiles('native-ios/project.yml') }}
       - name: iOS simulator build and tests
         run: |
           set -o pipefail
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for k,vs in d["devices"].items() if "iOS" in k for v in vs if "iPhone" in v["name"]))')
-          xcodebuild test -project native-ios/Rehberlik.xcodeproj -scheme Rehberlik -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath native-ios/TestResults.xcresult CODE_SIGNING_ALLOWED=NO | tee native-ios/build.log
+          xcodebuild test -project native-ios/Rehberlik.xcodeproj -scheme Rehberlik -derivedDataPath native-ios/DerivedData -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath native-ios/TestResults.xcresult CODE_SIGNING_ALLOWED=NO | tee native-ios/build.log
       - name: Unsigned device build
-        run: xcodebuild build -project native-ios/Rehberlik.xcodeproj -scheme Rehberlik -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
+        run: xcodebuild build -project native-ios/Rehberlik.xcodeproj -scheme Rehberlik -derivedDataPath native-ios/DerivedData -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
+      - uses: actions/cache/save@v4
+        if: always() && steps.xcode-cache.outputs.cache-hit != 'true'
+        with:
+          path: native-ios/DerivedData
+          key: native-ios-${{ runner.os }}-${{ runner.arch }}-xcode16.4-${{ hashFiles('native-ios/project.yml') }}
+      - name: Export simulator screenshots
+        if: always()
+        run: |
+          if [ -d native-ios/TestResults.xcresult ]; then
+            xcrun xcresulttool export attachments --path native-ios/TestResults.xcresult --output-path native-ios/Screenshots
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -59,3 +75,4 @@ jobs:
           path: |
             native-ios/TestResults.xcresult
             native-ios/build.log
+            native-ios/Screenshots

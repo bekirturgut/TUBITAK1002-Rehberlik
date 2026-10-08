@@ -72,6 +72,8 @@ struct UserEditor:View {
     @State private var name="",surname="",phone="",password=""
     @State private var role:UserRole = .mother
     @State private var disabled=false,busy=false
+    @State private var creationID=UUID().uuidString
+    @State private var saveError:String?
     var body:some View {
         Form {
             Section("Profil") {
@@ -85,6 +87,7 @@ struct UserEditor:View {
                 SecureField("En az 8 karakter",text:$password).textContentType(.newPassword)
                 Text("Mevcut şifre görüntülenmez. Boş bırakırsanız değişmez.").font(.caption).foregroundStyle(.secondary)
             }
+            if let saveError {Section{Text(saveError).foregroundStyle(.red)}}
             Button("Kaydet") {
                 busy=true;Task {
                     defer{busy=false}
@@ -93,9 +96,9 @@ struct UserEditor:View {
                         guard !name.trimmingCharacters(in:.whitespaces).isEmpty,!surname.trimmingCharacters(in:.whitespaces).isEmpty else {throw EditorError.invalid("Ad ve soyad giriniz.")}
                         guard user != nil || password.count>=8 else {throw EditorError.invalid("Yeni kullanıcı için en az 8 karakterli şifre gerekiyor.")}
                         var data:[String:Any]=["name":name,"surname":surname,"phone":normalized,"role":role.rawValue,"disabled":disabled]
-                        if let user {data["id"]=user.id};if !password.isEmpty{data["password"]=password}
+                        data["id"]=user?.id ?? creationID;if !password.isEmpty{data["password"]=password}
                         _=try await store.call("saveNativeUser",data);password="";dismiss()
-                    } catch{store.errorMessage=error.localizedDescription}
+                    } catch{saveError=error.localizedDescription}
                 }
             }.disabled(busy)
             if busy{ProgressView()}
@@ -163,6 +166,9 @@ struct ContentEditor:View {
     @State private var week=1,days=0
     @State private var active=true,busy=false
     @State private var target:UserRole = .mother
+    @State private var creationID=UUID().uuidString
+    @State private var createdAt=Date()
+    @State private var saveError:String?
     var body:some View {
         Form {
             Section(kind == .notifications ? "Başlık":"Soru") {TextField("Metin",text:$title,axis:.vertical).lineLimit(2...6)}
@@ -173,6 +179,7 @@ struct ContentEditor:View {
             }
             if kind != .faq {Toggle("Aktif",isOn:$active)}
             if kind == .bot,let issue=item?.data["embeddingError"] as? String {Section("Eşleştirme durumu"){Text(issue).foregroundStyle(.red)}}
+            if let saveError {Section{Text(saveError).foregroundStyle(.red)}}
             Button("Kaydet") {
                 busy=true;Task {
                     defer{busy=false}
@@ -186,8 +193,8 @@ struct ContentEditor:View {
                         case .bot:data=["question":question,"answer":answer,"isActive":active]
                         case .notifications:data=["title":question,"body":answer,"delayDays":days,"targetRole":target.rawValue,"isActive":active]
                         }
-                        try await store.saveContent(collection:item?.collection ?? kind.collection(role:role),id:item?.id,data:data);dismiss()
-                    }catch{store.errorMessage=error.localizedDescription}
+                        try await store.saveContent(collection:item?.collection ?? kind.collection(role:role),id:item?.id,creationID:creationID,createdAt:createdAt,data:data);dismiss()
+                    }catch{saveError=error.localizedDescription}
                 }
             }.disabled(busy)
             if busy{ProgressView()}
