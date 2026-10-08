@@ -136,7 +136,6 @@ final class AppStore: ObservableObject {
     func logout() async {
         profileGeneration=UUID();profileListener?.remove(); profileListener=nil; clearData(); profile=nil; loading=false
         for key in ["native.remember","native.uid","native.role"] {UserDefaults.standard.removeObject(forKey:key)}
-        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     }
     func call(_ name:String,_ data:[String:Any]) async throws -> [String:Any] {
@@ -154,12 +153,13 @@ final class AppStore: ObservableObject {
             let granted=try await UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.badge,.sound])
             guard profile?.id==uid else { return }
             guard granted else { return }
+            await scheduleLegacyNotifications(uid:uid)
+            guard profile?.id==uid else {return}
             UIApplication.shared.registerForRemoteNotifications()
             guard Messaging.messaging().apnsToken != nil else { return }
             let token=try await Messaging.messaging().token()
             guard profile?.id==uid else { return }
             try await db.collection("users").document(uid).setData(["fcmToken":token,"fcmUpdatedAt":FieldValue.serverTimestamp()],merge:true)
-            await scheduleLegacyNotifications(uid:uid)
         } catch { errorMessage="Bildirim kaydı tamamlanamadı: \(error.localizedDescription)" }
     }
     private func scheduleLegacyNotifications(uid:String) async {

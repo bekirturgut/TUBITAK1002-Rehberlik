@@ -214,6 +214,6 @@ struct QuizView:View {
                 }
             }.padding().frame(maxWidth:650,alignment:.leading).frame(maxWidth:.infinity)
         }.navigationTitle("Öğrenme kartları").navigationBarTitleDisplayMode(.inline)
-        .task {if !store.demo,let uid=store.profile?.id {do{try await store.refreshStats(uid:uid,assignedCount:store.eligibleCards.count)}catch{store.errorMessage=error.localizedDescription}}}
+        .task(id:store.eligibleCards.map(\.id).sorted().joined(separator:"|")) {if !store.demo,let uid=store.profile?.id {do{try await store.refreshStats(uid:uid,assignedCount:store.eligibleCards.count)}catch{store.errorMessage=error.localizedDescription}}}
     }
 }
