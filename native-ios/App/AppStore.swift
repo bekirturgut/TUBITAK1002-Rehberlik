@@ -23,7 +23,9 @@ final class AppStore: ObservableObject {
     private var profileGeneration=UUID()
     private var generation=UUID()
     let demo=ProcessInfo.processInfo.arguments.contains("-ui-testing")
-    var db: Firestore { Firestore.firestore() }
+    private let database: Firestore?
+    init(database:Firestore? = nil) {self.database=database}
+    var db: Firestore { database ?? Firestore.firestore() }
     var functions: Functions { Functions.functions(region:"europe-west1") }
     var eligibleCards: [LearningCard] {
         guard let profile,let col=profile.role.cardCollection else { return [] }
@@ -146,7 +148,7 @@ final class AppStore: ObservableObject {
     func syncDevice() async {
         guard !demo,let uid=profile?.id else { return }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-emulator-testing") { return }
+        if ProcessInfo.processInfo.arguments.contains("-emulator-testing") || db.settings.host.hasPrefix("127.0.0.1:") { return }
         #endif
         do {
             let granted=try await UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.badge,.sound])
