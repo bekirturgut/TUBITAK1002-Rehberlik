@@ -30,6 +30,9 @@ targets:
         CODE_SIGN_ENTITLEMENTS: App/Rehberlik.entitlements
         'CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]': App/Simulator.entitlements
         INFOPLIST_KEY_UIBackgroundModes: [remote-notification]
+      configs:
+        Release:
+          CODE_SIGN_ENTITLEMENTS: App/Distribution.entitlements
     info:
       path: App/Info.plist
       properties:

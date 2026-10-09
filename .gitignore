@@ -54,3 +54,11 @@ app.*.map.json
 /android/app/release
 
 .legacy-emulator/
+
+# Apple signing material and generated distribution artifacts
+*.p12
+*.p8
+*.mobileprovision
+*.csr
+native-ios/Signing/
+native-ios/Distribution/

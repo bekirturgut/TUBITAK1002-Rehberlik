@@ -30,4 +30,6 @@ GitHub Actions also tests the unsigned device build. Demo UI tests use `-ui-test
 
 ## Device distribution
 
+The manual `native-ios-signed.yml` workflow prepares an App Store distribution archive and signed IPA using GitHub signing secrets. Membership and signing material are not available yet, so an actual signed build has not been tested or produced. Upload to App Store Connect is not automatic. See the [Turkish setup instructions](../docs/IOS_IMZALI_DAGITIM.md).
+
 Apple Developer signing, APNs key upload to Firebase, TestFlight and physical iPhone notification tests are still required for distribution. These do not require changing the existing login or migrating users. No live backend deployment is required by the client conversion itself, provided existing Firestore rules allow the unchanged Flutter operations.

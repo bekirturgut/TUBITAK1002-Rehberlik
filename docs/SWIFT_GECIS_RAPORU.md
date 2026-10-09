@@ -37,3 +37,9 @@ Swift/Firestore testi kısa mevcut şifreyle kullanıcı oluşturmayı, şifreyi
 Yeni Gemini anahtarı eski backend'in kullandığı SDK üzerinden model listeleme isteğiyle doğrulandı. Emülatör testlerinde Gemini ve push gönderimi taklit edilir; bu testler veri akışını doğrular, gerçek model yanıt kalitesini veya APNs teslimini kanıtlamaz.
 
 Canlı dağıtım veya gerçek kullanıcı verisi değişikliği yapılmadı. Gerçek Gemini cevabı, fiziksel iPhone/APNs ve Apple imzalama ayrı doğrulama gerektirir. İmzasız derleme cihazda çalıştırma veya TestFlight dağıtımı değildir. Otomatik kontrollerin geçmesi tüm olası hataların bulunmuş olduğunu garanti etmez.
+
+## İmzalı dağıtım hazırlığı
+
+9 Ekim 2026'da ayrı bir manuel App Store imzalama workflow'u, profil ön kontrolü ve üretim push entitlement dosyası eklendi. Bundle ID korunur; uygulamanın Auth/veri akışı değiştirilmedi. YAML/shell/plist kontrolleri, geçerli sentetik profil ile export ayarı üretimi ve altı geçersiz profil senaryosunun reddi yerelde doğrulandı; yedi kaynak uyumluluk testi yeniden geçti.
+
+Henüz Apple Developer üyeliği bulunmadığı için gerçek imzalı archive/IPA üretilemedi ve gerçek sertifika/profil ile bu yeni workflow çalıştırılmadı. Yukarıdaki 39 test sonucu `306ad10` koduna aittir. [Üyelik ve imzalı dağıtım adımları](IOS_IMZALI_DAGITIM.md).
