@@ -19,10 +19,13 @@ final class LegacyStoreTests:XCTestCase {
     @MainActor
     private func makeEmulatorDatabase() throws -> Firestore {
         print("LegacyStore: configuring isolated Firestore")
-        // Copy valid public client identifiers; all database operations use the isolated demo emulator.
-        guard let options=FirebaseApp.app()?.options.copy() as? FirebaseOptions else {throw DomainError.invalidProfile}
+        // FIRApp options (including their copies) are locked. Build a fresh test configuration.
+        guard let source=FirebaseApp.app()?.options else {throw DomainError.invalidProfile}
+        let options=FirebaseOptions(googleAppID:source.googleAppID,gcmSenderID:source.gcmSenderID)
+        options.apiKey=source.apiKey
+        options.bundleID=source.bundleID
         options.projectID="demo-rehberlik"
-        print("LegacyStore: copied client options")
+        print("LegacyStore: created independent client options")
         if FirebaseApp.app(name:"LegacyStoreTests")==nil {FirebaseApp.configure(name:"LegacyStoreTests",options:options)}
         print("LegacyStore: configured named Firebase app")
         let db=Firestore.firestore(app:FirebaseApp.app(name:"LegacyStoreTests")!)
