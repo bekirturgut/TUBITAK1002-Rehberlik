@@ -1,6 +1,6 @@
 # Swift istemcisi: mevcut akışa dönüş
 
-Tarih: 8 Ekim 2026. Dal: `migration/native-swift`.
+Tarih: 9 Ekim 2026. Dal: `migration/native-swift`.
 
 Kullanıcının isteğiyle Swift dönüşümü sırasında eklenen backend/Auth mimarisi geri alındı. Önceki rapordaki Auth geçişi, kullanıcı/şifre taşıması, yeni kurallar ve embedding backfill adımları artık uygulanmamalıdır; ilgili araçlar kaldırıldı.
 
@@ -17,8 +17,23 @@ Kullanıcının isteğiyle Swift dönüşümü sırasında eklenen backend/Auth 
 
 ## Doğrulama
 
-Bu sürüme ait sonuçlar tamamlandıktan sonra burada kaydedilecektir. Önceki sürümün 49 test sonucu, geri alınmış Auth mimarisine aittir; bu sürümün kanıtı olarak kullanılamaz.
+Doğrulanan kod: `306ad102d2f7e513ec0ebae868e43daccfa55dff`. [GitHub Actions çalışması](https://github.com/bekirturgut/TUBITAK1002-Rehberlik/actions/runs/37898717007) hem backend hem Swift/iOS işi için başarılıdır.
 
-Yeni testler: orijinal dosya eşitliği ve Flutter kaynak kontrolü; izole Firestore/Functions emülatöründe eski callable payload'ları, quiz kayıtları, kullanıcı rolleri, uzman yanıtı/alert durumu ve eski token/kuyruk biçimi; macOS Swift çekirdek, model ve UI testleri; iPhone imzasız Release derlemesi.
+| Kontrol | Sonuç |
+| --- | --- |
+| Orijinal kaynak/config eşitliği ve yeni Auth bağımlılıklarının kaldırılması | 7/7 geçti |
+| İzole Firestore/Functions emülatöründe eski veri akışı | 12/12 geçti |
+| Swift çekirdek: telefon, hafta, quiz seçenekleri, oran ve rozetler | 11/11 geçti |
+| iOS model ve gerçek Swift/Firestore kullanıcı işlemleri | 4/4 geçti |
+| iOS ekranları ve gerçek emülatör giriş–quiz–uzman sohbeti | 5/5 geçti |
+| Fiziksel iPhone hedefi için imzasız Release derlemesi | Başarılı |
 
-Canlı dağıtım veya gerçek kullanıcı verisi değişikliği yapılmadı. Gerçek Gemini cevabı, fiziksel iPhone/APNs ve Apple imzalama ayrı doğrulama gerektirir.
+Toplam 39 ayrı test/kontrol geçti; XCTest ve kaynak uyumluluk testlerinde atlanan test yoktur. Backend emülatör kontrolleri ayrıca macOS işinde de çalıştırıldı. Önceki Auth mimarisine ait 49 test sonucu bu sürüm için kullanılmamıştır.
+
+Swift/Firestore testi kısa mevcut şifreyle kullanıcı oluşturmayı, şifreyi değiştirmeden düzenlemeyi, yanlış şifre/rol reddini, giriş geçmişini, yanlış→doğru quiz kaydını, %25 rozetini, çıkışı ve eski kullanıcı silme kapsamını doğruladı. Ekran testi annenin giriş ve quiz akışını, uzman yönlendirmesini, admin yanıtını ve bu yanıtın anneye ulaşmasını tamamladı.
+
+İlk test çalışmasındaki Firebase kurulum hatası giderildi: emülatör için kilitlenmiş mevcut Firebase seçeneklerinin kopyası değiştirilmek yerine ayrı bir yapılandırma oluşturulur. Bu değişiklik test dosyasındadır; üretim giriş akışını değiştirmez.
+
+Yeni Gemini anahtarı eski backend'in kullandığı SDK üzerinden model listeleme isteğiyle doğrulandı. Emülatör testlerinde Gemini ve push gönderimi taklit edilir; bu testler veri akışını doğrular, gerçek model yanıt kalitesini veya APNs teslimini kanıtlamaz.
+
+Canlı dağıtım veya gerçek kullanıcı verisi değişikliği yapılmadı. Gerçek Gemini cevabı, fiziksel iPhone/APNs ve Apple imzalama ayrı doğrulama gerektirir. İmzasız derleme cihazda çalıştırma veya TestFlight dağıtımı değildir. Otomatik kontrollerin geçmesi tüm olası hataların bulunmuş olduğunu garanti etmez.

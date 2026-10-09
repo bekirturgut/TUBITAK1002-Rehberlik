@@ -15,6 +15,8 @@ The original backend flow is restored from `e445e39`; only FieldValue/Timestamp 
 
 ## Build and tests
 
+Validated on 9 October 2026 at `306ad10`: [successful CI run](https://github.com/bekirturgut/TUBITAK1002-Rehberlik/actions/runs/37898717007). All 39 distinct tests/checks passed, including actual Swift/Firestore user operations and UI login–quiz–expert conversation. The unsigned iPhone Release build also succeeded. See the [validation report](../docs/SWIFT_GECIS_RAPORU.md) for scope and limits.
+
 Requires macOS, Xcode 16.4+ and XcodeGen. iOS target: 16.
 
 ```sh
