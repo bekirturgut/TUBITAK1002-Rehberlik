@@ -17,8 +17,9 @@ final class LegacyStoreTests:XCTestCase {
     @MainActor
     private func exerciseLegacyStore() async throws {
         print("LegacyStore: configuring isolated Firestore")
-        let options=FirebaseOptions(googleAppID:"1:123:ios:abc123",gcmSenderID:"123")
-        options.projectID="demo-rehberlik";options.apiKey="fake-api-key"
+        // Copy valid public client identifiers; all database operations use the isolated demo emulator.
+        guard let options=FirebaseApp.app()?.options.copy() as? FirebaseOptions else {throw DomainError.invalidProfile}
+        options.projectID="demo-rehberlik"
         if FirebaseApp.app(name:"LegacyStoreTests")==nil {FirebaseApp.configure(name:"LegacyStoreTests",options:options)}
         let db=Firestore.firestore(app:FirebaseApp.app(name:"LegacyStoreTests")!)
         let settings=db.settings;settings.host="127.0.0.1:8080";settings.isSSLEnabled=false;db.settings=settings
