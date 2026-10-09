@@ -89,6 +89,7 @@ jobs:
         run: |
           if [ -d native-ios/TestResults.xcresult ]; then
             xcrun xcresulttool export attachments --path native-ios/TestResults.xcresult --output-path native-ios/Screenshots
+            xcrun xcresulttool export diagnostics --path native-ios/TestResults.xcresult --output-path native-ios/Diagnostics
           fi
       - uses: actions/upload-artifact@v4
         if: always()
@@ -98,6 +99,7 @@ jobs:
             native-ios/TestResults.xcresult
             native-ios/build.log
             native-ios/Screenshots
+            native-ios/Diagnostics
             native-ios/emulator.log
       - uses: actions/cache/save@v4
         if: always() && !cancelled() && steps.xcode-cache.outputs.cache-hit != 'true'

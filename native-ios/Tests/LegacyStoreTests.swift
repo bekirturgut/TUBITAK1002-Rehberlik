@@ -5,24 +5,34 @@ import RehberlikCore
 @testable import Rehberlik
 
 final class LegacyStoreTests:XCTestCase {
+    @MainActor
     func testRealLegacyLoginEditingQuizAndDeletion() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["RUN_FIREBASE_UI_TESTS"]=="1","Requires isolated demo Firestore.")
+        let db=try makeEmulatorDatabase()
         let done=expectation(description:"Legacy Firestore operations")
         Task { @MainActor in
-            do {try await exerciseLegacyStore()} catch {XCTFail("Legacy Firestore operation failed: \(error)")}
+            do {try await exerciseLegacyStore(db)} catch {XCTFail("Legacy Firestore operation failed: \(error)")}
             done.fulfill()
         }
         wait(for:[done],timeout:90)
     }
     @MainActor
-    private func exerciseLegacyStore() async throws {
+    private func makeEmulatorDatabase() throws -> Firestore {
         print("LegacyStore: configuring isolated Firestore")
         // Copy valid public client identifiers; all database operations use the isolated demo emulator.
         guard let options=FirebaseApp.app()?.options.copy() as? FirebaseOptions else {throw DomainError.invalidProfile}
         options.projectID="demo-rehberlik"
+        print("LegacyStore: copied client options")
         if FirebaseApp.app(name:"LegacyStoreTests")==nil {FirebaseApp.configure(name:"LegacyStoreTests",options:options)}
+        print("LegacyStore: configured named Firebase app")
         let db=Firestore.firestore(app:FirebaseApp.app(name:"LegacyStoreTests")!)
+        print("LegacyStore: created Firestore instance")
         let settings=db.settings;settings.host="127.0.0.1:8080";settings.isSSLEnabled=false;db.settings=settings
+        print("LegacyStore: configured emulator host")
+        return db
+    }
+    @MainActor
+    private func exerciseLegacyStore(_ db:Firestore) async throws {
         let store=AppStore(database:db),uid="legacy-store-"+UUID().uuidString
         let ref=db.collection("users").document(uid)
         print("LegacyStore: creating test profile")
