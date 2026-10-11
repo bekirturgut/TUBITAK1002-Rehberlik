@@ -1,0 +1,6 @@
+# Copy to key.properties and supply private upload-key credentials.
+# Use forward slashes for the Windows keystore path.
+storePassword=YOUR_STORE_PASSWORD
+keyPassword=YOUR_KEY_PASSWORD
+keyAlias=upload
+storeFile=C:/Users/YOUR_USER/.android-signing/tubitak-rehberlik/upload-keystore.jks
