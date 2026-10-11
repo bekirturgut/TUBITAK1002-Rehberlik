@@ -1,18 +1,17 @@
+import 'privacy_page.dart';
+import '../services/privacy_consent.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../constants.dart';
+import '../services/pending_chat_messages.dart';
 
 class ChatPage extends StatefulWidget {
   final String userId;
   final String selectedRole;
 
-  const ChatPage({
-    super.key,
-    required this.userId,
-    required this.selectedRole,
-  });
+  const ChatPage({super.key, required this.userId, required this.selectedRole});
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -57,6 +56,8 @@ class _ChatPageState extends State<ChatPage> {
     final text = _msgCtrl.text.trim();
     if (text.isEmpty || _sending) return;
 
+    if (!_isAdminView && !await ensureAiConsent(context, widget.userId)) return;
+    if (!mounted) return;
     setState(() => _sending = true);
     _msgCtrl.clear();
 
@@ -78,9 +79,9 @@ class _ChatPageState extends State<ChatPage> {
       }, SetOptions(merge: true));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Mesaj gönderilemedi: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Mesaj gönderilemedi: $e")));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -97,30 +98,40 @@ class _ChatPageState extends State<ChatPage> {
       "isAnswered": false,
     });
 
+    await _requestBotReply(text, userMsgRef.id);
+  }
+
+  Future<void> _requestBotReply(String text, String sourceMessageId) async {
+    if (!await ensureAiConsent(context, widget.userId)) return;
     try {
-      final callable = FirebaseFunctions.instanceFor(
-        region: "europe-west1",
-      ).httpsCallable("askFaqBot");
+      final callable = FirebaseFunctions.instanceFor(region: "europe-west1")
+          .httpsCallable(
+            "askFaqBot",
+            options: HttpsCallableOptions(timeout: const Duration(seconds: 75)),
+          );
 
       final result = await callable.call({
         "question": text,
         "userId": widget.userId,
-        "sourceMessageId": userMsgRef.id,
+        "sourceMessageId": sourceMessageId,
+        "aiConsent": true,
+        "privacyVersion": privacyVersion,
       });
 
       final resultData = Map<String, dynamic>.from(result.data as Map);
-      final botAnswer = (resultData["answer"] ?? "").toString();
+      final botAnswer = (resultData["answer"] ?? "").toString().trim();
+      if (botAnswer.isEmpty) throw StateError('Boş chatbot cevabı');
       final score = (resultData["score"] ?? 0).toDouble();
       final needsFeedback = resultData["needsFeedback"] == true;
       final escalated = resultData["escalated"] == true;
 
-      await _chatRef.collection("messages").add({
+      await _chatRef.collection("messages").doc("bot_$sourceMessageId").set({
         "text": botAnswer,
         "senderType": "bot",
         "senderId": "chatbot",
         "createdAt": FieldValue.serverTimestamp(),
         "relatedQuestion": text,
-        "sourceMessageId": userMsgRef.id,
+        "sourceMessageId": sourceMessageId,
         "score": score,
         "needsFeedback": needsFeedback,
         "showFeedbackButtons": needsFeedback,
@@ -128,21 +139,88 @@ class _ChatPageState extends State<ChatPage> {
         "isSufficient": null,
         "escalated": escalated,
       });
+      await _chatRef.collection('messages').doc(sourceMessageId).update({
+        'botRequestStatus': 'answered',
+      });
     } catch (e) {
       debugPrint("Bot error: $e");
+      try {
+        await _chatRef.collection('messages').doc(sourceMessageId).update({
+          'botRequestStatus': 'error',
+        });
+      } catch (_) {
+        // A connection error is still shown even if its status cannot be saved.
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 15),
+          content: const Text(
+            'Sorunuz kaydedildi ancak chatbot şu anda cevap veremiyor.',
+          ),
+          action: SnackBarAction(
+            label: 'Tekrar dene',
+            onPressed: () async {
+              if (_sending) return;
+              setState(() => _sending = true);
+              try {
+                await _requestBotReply(text, sourceMessageId);
+              } finally {
+                if (mounted) setState(() => _sending = false);
+              }
+            },
+          ),
+        ),
+      );
     }
   }
 
   Future<void> _sendAdminMessage(String text) async {
-    await _chatRef.collection('messages').add({
+    String? replyId = _replyingToMessageId;
+    String? replyText = _replyingToText;
+    if (replyId == null) {
+      final snapshot = await _chatRef.collection('messages').get();
+      final messages = {for (final doc in snapshot.docs) doc.id: doc.data()};
+      final pending = pendingQuestionIds(messages);
+      if (pending.length > 1) {
+        _msgCtrl.text = text;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Yanıtlamak istediğiniz sorunun Cevapla düğmesine dokunun.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+      if (pending.length == 1) {
+        replyId = pending.single;
+        replyText = messages[replyId]?['text']?.toString();
+      }
+    }
+    final replyRef = _chatRef.collection('messages').doc();
+    final batch = FirebaseFirestore.instance.batch();
+    batch.set(replyRef, {
       "text": text,
       "senderType": "admin",
       "senderRole": widget.selectedRole,
       "senderId": widget.userId,
       "createdAt": FieldValue.serverTimestamp(),
-      "replyToMessageId": _replyingToMessageId ?? "",
-      "replyToText": _replyingToText ?? "",
+      "replyToMessageId": replyId ?? "",
+      "replyToText": replyText ?? "",
     });
+    if (replyId != null) {
+      batch.update(_chatRef.collection('messages').doc(replyId), {
+        'needsAdminReply': false,
+        'isAnswered': true,
+        'answeredAt': FieldValue.serverTimestamp(),
+        'answerMessageId': replyRef.id,
+        'answerText': text,
+      });
+    }
+    await batch.commit();
 
     if (mounted) {
       setState(() {
@@ -179,16 +257,12 @@ class _ChatPageState extends State<ChatPage> {
 
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Sorunuz uzman'e yönlendirildi."),
-          ),
+          const SnackBar(content: Text("Sorunuz uzman'e yönlendirildi.")),
         );
       } else {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Geri bildiriminiz kaydedildi."),
-          ),
+          const SnackBar(content: Text("Geri bildiriminiz kaydedildi.")),
         );
       }
     } catch (e) {
@@ -231,9 +305,9 @@ class _ChatPageState extends State<ChatPage> {
   bool _isAnswered(Map<String, dynamic> data) => data["isAnswered"] == true;
 
   Color _bubbleColorFor(
-      Map<String, dynamic> data, {
-        required bool isAdminView,
-      }) {
+    Map<String, dynamic> data, {
+    required bool isAdminView,
+  }) {
     final senderType = (data["senderType"] ?? "").toString();
 
     if (senderType == "user") {
@@ -393,7 +467,9 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget _buildReplyPreviewBox() {
-    if (!_isAdminView || _replyingToMessageId == null || _replyingToText == null) {
+    if (!_isAdminView ||
+        _replyingToMessageId == null ||
+        _replyingToText == null) {
       return const SizedBox.shrink();
     }
 
@@ -408,11 +484,7 @@ class _ChatPageState extends State<ChatPage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
-            Icons.reply_rounded,
-            color: Color(0xFFB87912),
-            size: 20,
-          ),
+          const Icon(Icons.reply_rounded, color: Color(0xFFB87912), size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -495,12 +567,15 @@ class _ChatPageState extends State<ChatPage> {
     if (!pending && !answered) return const SizedBox.shrink();
 
     final String statusText = pending ? "Cevap bekliyor" : "Cevaplandı";
-    final Color statusBgColor =
-    pending ? const Color(0xFFFFF0E6) : const Color(0xFFEAF8ED);
-    final Color statusBorderColor =
-    pending ? const Color(0xFFFFC9A6) : const Color(0xFFA9D8B5);
-    final Color statusTextColor =
-    pending ? const Color(0xFFB86128) : const Color(0xFF2E7D4F);
+    final Color statusBgColor = pending
+        ? const Color(0xFFFFF0E6)
+        : const Color(0xFFEAF8ED);
+    final Color statusBorderColor = pending
+        ? const Color(0xFFFFC9A6)
+        : const Color(0xFFA9D8B5);
+    final Color statusTextColor = pending
+        ? const Color(0xFFB86128)
+        : const Color(0xFF2E7D4F);
     final IconData statusIcon = pending
         ? Icons.hourglass_top_rounded
         : Icons.check_circle_outline_rounded;
@@ -517,11 +592,7 @@ class _ChatPageState extends State<ChatPage> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              statusIcon,
-              size: 15,
-              color: statusTextColor,
-            ),
+            Icon(statusIcon, size: 15, color: statusTextColor),
             const SizedBox(width: 6),
             Text(
               statusText,
@@ -555,15 +626,15 @@ class _ChatPageState extends State<ChatPage> {
       child: Align(
         alignment: Alignment.centerRight,
         child: OutlinedButton.icon(
-          onPressed: () => _startReplyingTo(
-            messageId: messageId,
-            messageText: message,
-          ),
+          onPressed: () =>
+              _startReplyingTo(messageId: messageId, messageText: message),
           style: OutlinedButton.styleFrom(
-            foregroundColor:
-            isSelected ? Colors.white : const Color(0xFFB86128),
-            backgroundColor:
-            isSelected ? const Color(0xFFB86128) : Colors.transparent,
+            foregroundColor: isSelected
+                ? Colors.white
+                : const Color(0xFFB86128),
+            backgroundColor: isSelected
+                ? const Color(0xFFB86128)
+                : Colors.transparent,
             side: const BorderSide(color: Color(0xFFB86128)),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
@@ -592,6 +663,13 @@ class _ChatPageState extends State<ChatPage> {
                     return const Center(child: CircularProgressIndicator());
                   }
 
+                  if (snapshot.hasError) {
+                    return const Center(
+                      child: Text(
+                        'Mesajlar yüklenemedi. Bağlantınızı kontrol edin.',
+                      ),
+                    );
+                  }
                   final docs = snapshot.data?.docs ?? [];
 
                   if (docs.isEmpty) {
@@ -612,8 +690,9 @@ class _ChatPageState extends State<ChatPage> {
 
                       String timeText = "";
                       if (ts is Timestamp) {
-                        timeText =
-                            DateFormat("dd.MM.yyyy  HH:mm").format(ts.toDate());
+                        timeText = DateFormat(
+                          "dd.MM.yyyy  HH:mm",
+                        ).format(ts.toDate());
                       }
 
                       final isUser = _isUser(data);
@@ -710,10 +789,7 @@ class _ChatPageState extends State<ChatPage> {
                   isAdminView
                       ? "Kullanıcı mesajlarını yanıtlayabilirsiniz"
                       : "Sorularınızı buradan iletebilirsiniz",
-                  style: const TextStyle(
-                    color: Colors.black54,
-                    fontSize: 12.5,
-                  ),
+                  style: const TextStyle(color: Colors.black54, fontSize: 12.5),
                 ),
               ],
             ),
@@ -771,10 +847,7 @@ class _ChatPageState extends State<ChatPage> {
                     ? "Kullanıcı ilk mesajı gönderdiğinde konuşma burada görünecek."
                     : "Aşağıdan mesaj yazarak sohbeti başlatabilirsiniz 😊",
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.blueGrey,
-                  height: 1.4,
-                ),
+                style: const TextStyle(color: Colors.blueGrey, height: 1.4),
               ),
             ],
           ),
@@ -791,10 +864,7 @@ class _ChatPageState extends State<ChatPage> {
     required bool isUser,
     required bool isAdminView,
   }) {
-    final bubbleColor = _bubbleColorFor(
-      data,
-      isAdminView: isAdminView,
-    );
+    final bubbleColor = _bubbleColorFor(data, isAdminView: isAdminView);
     final label = _senderLabel(data);
     final accent = _senderAccent(data);
     final icon = _senderIcon(data);
@@ -810,8 +880,9 @@ class _ChatPageState extends State<ChatPage> {
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Column(
-        crossAxisAlignment:
-        isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: isUser
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
           if (!isUser) ...[
             Padding(
@@ -888,6 +959,24 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
 
+          if (!isAdminView &&
+              isUser &&
+              !_isAnswered(data) &&
+              data['botRequestStatus'] == 'error')
+            TextButton.icon(
+              icon: const Icon(Icons.refresh),
+              label: const Text('Yanıt alınamadı · Tekrar dene'),
+              onPressed: _sending
+                  ? null
+                  : () async {
+                      setState(() => _sending = true);
+                      try {
+                        await _requestBotReply(message, messageId);
+                      } finally {
+                        if (mounted) setState(() => _sending = false);
+                      }
+                    },
+            ),
           _buildAdminReplyButton(
             messageId: messageId,
             message: message,
@@ -948,10 +1037,7 @@ class _ChatPageState extends State<ChatPage> {
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Text(
               timeText,
-              style: const TextStyle(
-                fontSize: 11,
-                color: Colors.grey,
-              ),
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
             ),
           ),
         ],
@@ -1014,18 +1100,18 @@ class _ChatPageState extends State<ChatPage> {
                 alignment: Alignment.center,
                 child: _sending
                     ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.2,
-                    color: Colors.white,
-                  ),
-                )
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: Colors.white,
+                        ),
+                      )
                     : const Icon(
-                  Icons.send_rounded,
-                  color: Colors.white,
-                  size: 22,
-                ),
+                        Icons.send_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
               ),
             ),
           ),

@@ -6,6 +6,7 @@ import 'package:tubitak/Pages/LoginPage.dart';
 import 'package:tubitak/services/local_notifications.dart';
 import 'package:tubitak/widgets/app_animations.dart';
 import 'firebase_options.dart';
+import 'widgets/privacy_gate.dart';
 
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
@@ -62,7 +63,7 @@ class _MyAppState extends State<MyApp> {
           },
         ),
       ),
-      home: const LoginPage(),
+      home: const PrivacyGate(child: LoginPage()),
     );
   }
 }

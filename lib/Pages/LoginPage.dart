@@ -1,3 +1,4 @@
+import 'privacy_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:tubitak/Pages/AdminPage.dart';
@@ -237,6 +238,7 @@ class _LoginPageState extends State<LoginPage> {
           child: SingleChildScrollView(
             child: Column(
               children: [
+                PrivacyButton(),
                 const SizedBox(height: 40),
                 EntranceAnimation(
                   duration: const Duration(milliseconds: 750),

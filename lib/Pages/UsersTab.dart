@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../constants.dart';
 import 'ChatPage.dart';
+import '../services/pending_chat_messages.dart';
 import 'UserDetailPage.dart';
 
 class UsersTab extends StatefulWidget {
@@ -16,6 +17,9 @@ class _UsersTabState extends State<UsersTab> {
   final FocusNode _searchFocus = FocusNode();
 
   String _q = "";
+  late final Stream<Set<String>> _pendingChats = watchPendingChats(
+    FirebaseFirestore.instance,
+  );
 
   @override
   void dispose() {
@@ -59,8 +63,8 @@ class _UsersTabState extends State<UsersTab> {
         title: const Text("Kullanıcı silinsin mi?"),
         content: Text(
           "$fullName adlı kullanıcı silinecek.\n"
-              "Bildirimler ve giriş geçmişi de tamamen kaldırılacak.\n\n"
-              "Bu işlem geri alınamaz.",
+          "Bildirimler ve giriş geçmişi de tamamen kaldırılacak.\n\n"
+          "Bu işlem geri alınamaz.",
         ),
         actions: [
           TextButton(
@@ -68,14 +72,9 @@ class _UsersTabState extends State<UsersTab> {
             child: const Text("İptal"),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              "Sil",
-              style: TextStyle(color: Colors.white),
-            ),
+            child: const Text("Sil", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -87,9 +86,9 @@ class _UsersTabState extends State<UsersTab> {
       await _deleteUserCascade(userId);
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("$fullName silindi")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("$fullName silindi")));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -121,19 +120,22 @@ class _UsersTabState extends State<UsersTab> {
             ),
             const SizedBox(height: 12),
             Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection("chats")
-                    .where("hasPendingAdminReply", isEqualTo: true)
-                    .snapshots(),
+              child: StreamBuilder<Set<String>>(
+                stream: _pendingChats,
                 builder: (context, pendingSnapshot) {
                   if (pendingSnapshot.connectionState ==
                       ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
 
-                  final pendingDocs = pendingSnapshot.data?.docs ?? [];
-                  final pendingUserIds = pendingDocs.map((d) => d.id).toSet();
+                  if (pendingSnapshot.hasError) {
+                    return const Center(
+                      child: Text(
+                        'Bekleyen sorular yüklenemedi. Bağlantınızı kontrol edin.',
+                      ),
+                    );
+                  }
+                  final pendingChatIds = pendingSnapshot.data ?? <String>{};
 
                   return StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
@@ -141,14 +143,20 @@ class _UsersTabState extends State<UsersTab> {
                         .orderBy("createdAt", descending: true)
                         .snapshots(),
                     builder: (context, snapshot) {
-                      if (snapshot.connectionState ==
-                          ConnectionState.waiting) {
-                        return const Center(
-                          child: CircularProgressIndicator(),
-                        );
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
                       }
 
+                      if (snapshot.hasError) {
+                        return const Center(
+                          child: Text('Kullanıcılar yüklenemedi.'),
+                        );
+                      }
                       final docs = snapshot.data?.docs ?? [];
+                      final existingUserIds = docs.map((d) => d.id).toSet();
+                      final pendingUserIds = pendingChatIds.intersection(
+                        existingUserIds,
+                      );
 
                       final filteredDocs = docs.where((d) {
                         final user = d.data() as Map<String, dynamic>;
@@ -249,17 +257,19 @@ class _UsersTabState extends State<UsersTab> {
         suffixIcon: _q.isEmpty
             ? null
             : IconButton(
-          icon: const Icon(Icons.clear, color: AppColors.textBlue),
-          onPressed: () {
-            _searchCtrl.clear();
-            setState(() => _q = "");
-            _searchFocus.requestFocus();
-          },
-        ),
+                icon: const Icon(Icons.clear, color: AppColors.textBlue),
+                onPressed: () {
+                  _searchCtrl.clear();
+                  setState(() => _q = "");
+                  _searchFocus.requestFocus();
+                },
+              ),
         filled: true,
         fillColor: Colors.white,
-        contentPadding:
-        const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 12,
+          horizontal: 14,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
           borderSide: BorderSide.none,
@@ -286,10 +296,7 @@ class _UsersTabState extends State<UsersTab> {
             size: 40,
           ),
           const SizedBox(height: 10),
-          const Text(
-            "Toplam Üye",
-            style: TextStyle(color: AppColors.textBlue),
-          ),
+          const Text("Toplam Üye", style: TextStyle(color: AppColors.textBlue)),
           Text(
             "$count",
             style: const TextStyle(
@@ -301,10 +308,7 @@ class _UsersTabState extends State<UsersTab> {
           const SizedBox(height: 10),
           if (pendingCount > 0)
             Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 8,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: Colors.red.shade100,
                 borderRadius: BorderRadius.circular(14),
@@ -323,12 +327,12 @@ class _UsersTabState extends State<UsersTab> {
   }
 
   Widget _buildSection(
-      BuildContext context,
-      String title,
-      List<QueryDocumentSnapshot> users,
-      Color color,
-      Set<String> pendingUserIds,
-      ) {
+    BuildContext context,
+    String title,
+    List<QueryDocumentSnapshot> users,
+    Color color,
+    Set<String> pendingUserIds,
+  ) {
     if (users.isEmpty) {
       if (_q.isNotEmpty) {
         return Padding(
@@ -361,8 +365,8 @@ class _UsersTabState extends State<UsersTab> {
           itemBuilder: (context, i) {
             final user = users[i].data() as Map<String, dynamic>;
             final id = users[i].id;
-            final fullName =
-            "${user["name"] ?? ""} ${user["surname"] ?? ""}".trim();
+            final fullName = "${user["name"] ?? ""} ${user["surname"] ?? ""}"
+                .trim();
             final hasPending = pendingUserIds.contains(id);
 
             return Container(
@@ -386,13 +390,10 @@ class _UsersTabState extends State<UsersTab> {
                   borderRadius: BorderRadius.circular(16),
                   gradient: hasPending
                       ? LinearGradient(
-                    colors: [
-                      Colors.red.shade50,
-                      Colors.white,
-                    ],
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                  )
+                          colors: [Colors.red.shade50, Colors.white],
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                        )
                       : null,
                 ),
                 child: ListTile(
@@ -407,10 +408,7 @@ class _UsersTabState extends State<UsersTab> {
                       color: color.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(14),
                     ),
-                    child: Icon(
-                      Icons.person,
-                      color: color,
-                    ),
+                    child: Icon(Icons.person, color: color),
                   ),
                   title: Row(
                     children: [

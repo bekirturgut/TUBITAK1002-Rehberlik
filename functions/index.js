@@ -16,6 +16,7 @@ admin.initializeApp();
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: { timeout: 20000, retryOptions: { attempts: 1 } },
 });
 
 const db = admin.firestore();
@@ -29,17 +30,18 @@ setGlobalOptions({
  * Yardımcı: sohbetin bekleyen admin cevap durumunu mesajlara göre senkronla
  */
 async function syncChatPendingState(userId) {
-  const pendingSnap = await db
-    .collection("chats")
-    .doc(userId)
-    .collection("messages")
-    .where("senderType", "==", "user")
-    .where("needsAdminReply", "==", true)
-    .where("isAnswered", "==", false)
-    .limit(500)
-    .get();
-
-  const pendingCount = pendingSnap.size;
+  // Read source messages directly: no composite index or stale summary dependency.
+  const messages = await db.collection("chats").doc(userId)
+    .collection("messages").get();
+  const repliedTo = new Set(messages.docs
+    .filter(doc => doc.data().senderType === "admin")
+    .map(doc => doc.data().replyToMessageId));
+  const pendingCount = messages.docs.filter(doc => {
+    const data = doc.data();
+    return data.senderType === "user" && String(data.text || "").trim() &&
+      data.needsAdminReply === true && data.isAnswered !== true &&
+      !repliedTo.has(doc.id);
+  }).length;
   const now = FieldValue.serverTimestamp();
 
   await db.collection("chats").doc(userId).set(
@@ -74,8 +76,13 @@ async function markMessageAsNeedsAdminReply({
     .collection("messages")
     .doc(messageId);
 
-  await msgRef.set(
-    {
+  await db.runTransaction(async transaction => {
+    const message = await transaction.get(msgRef);
+    if (!message.exists || message.data().senderType !== "user") {
+      throw new HttpsError("not-found", "Yönlendirilecek soru bulunamadı.");
+    }
+    if (message.data().isAnswered === true) return;
+    transaction.update(msgRef, {
       needsAdminReply: true,
       isAnswered: false,
       escalated: true,
@@ -83,9 +90,8 @@ async function markMessageAsNeedsAdminReply({
       relatedQuestion: question || "",
       score: Number(score || 0),
       updatedAt: now,
-    },
-    { merge: true }
-  );
+    });
+  });
 
   await syncChatPendingState(userId);
 }
@@ -102,8 +108,11 @@ async function createOrUpdateAdminAlert({
   const now = FieldValue.serverTimestamp();
 
   if (sourceMessageId) {
+    const source = await db.doc(`chats/${userId}/messages/${sourceMessageId}`).get();
+    if (!source.exists || source.data().isAnswered === true) return;
     const alertRef = db.collection("admin_alerts").doc(`${userId}_${sourceMessageId}`);
     const existing = await alertRef.get();
+    if (existing.data()?.status === "resolved") return;
 
     await alertRef.set(
       {
@@ -629,7 +638,7 @@ async function composeFaqAnswer({ question, matches }) {
   }));
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: process.env.GEMINI_FAQ_MODEL || "gemini-3.5-flash-lite",
     contents: [
       "Aşağıdaki kullanıcı sorusuna yalnızca sağlanan FAQ cevaplarındaki bilgileri kullanarak Türkçe cevap ver.",
       "Kullanıcının sorduğu noktaya odaklan ve metni doğal, anlaşılır tek bir cevap hâline getir.",
@@ -666,15 +675,13 @@ exports.askFaqBot = onCall(
     if (!question) {
       throw new HttpsError("invalid-argument", "Question boş");
     }
+    // Never send question text to third-party AI without explicit current consent.
+    if (request.data?.aiConsent !== true ||
+        request.data?.privacyVersion !== "2026-10-10-v1") {
+      throw new HttpsError("failed-precondition", "Gemini veri aktarımı için izin gerekiyor.");
+    }
 
     try {
-      const embed = await ai.models.embedContent({
-        model: "gemini-embedding-001",
-        contents: question,
-      });
-
-      const queryEmbedding = embed.embeddings[0].values;
-
       const snap = await db
         .collection("faq_items")
         .where("isActive", "==", true)
@@ -707,15 +714,27 @@ exports.askFaqBot = onCall(
         };
       }
 
+      let queryEmbedding = [];
+      try {
+        const embed = await ai.models.embedContent({
+          model: "gemini-embedding-001", contents: question,
+        });
+        queryEmbedding = embed.embeddings?.[0]?.values || [];
+      } catch (embeddingError) {
+        // An unavailable AI service must not leave the user without a response.
+        console.error("FAQ embedding unavailable:", embeddingError);
+      }
       const rankedMatches = [];
 
       for (const doc of snap.docs) {
         const data = doc.data() || {};
         const embedding = data.embedding;
 
-        if (!Array.isArray(embedding) || embedding.length === 0) continue;
-
-        const score = cosineSimilarity(queryEmbedding, embedding);
+        const exactQuestion = String(data.question || "").trim()
+          .toLocaleLowerCase("tr") === question.toLocaleLowerCase("tr");
+        if (!exactQuestion && (!Array.isArray(embedding) || !embedding.length ||
+            !queryEmbedding.length || embedding.length !== queryEmbedding.length)) continue;
+        const score = exactQuestion ? 1 : cosineSimilarity(queryEmbedding, embedding);
 
         const answer = String(data.answer || "").trim();
         const faqQuestion = String(data.question || "").trim();
@@ -788,6 +807,7 @@ exports.askFaqBot = onCall(
       };
     } catch (e) {
       console.error("askFaqBot error:", e);
+      if (e instanceof HttpsError) throw e;
       throw new HttpsError("internal", "Bot çalışırken hata oluştu");
     }
   }
@@ -911,15 +931,14 @@ exports.onAdminReplyResolveAlert = onDocumentCreated(
     const alertsSnap = await db
       .collection("admin_alerts")
       .where("userId", "==", userId)
-      .where("status", "==", "open")
-      .where("sourceMessageId", "==", replyToMessageId)
-      .limit(50)
       .get();
 
     if (!alertsSnap.empty) {
       const batch = db.batch();
 
       alertsSnap.docs.forEach((doc) => {
+        if (doc.data().status !== "open" ||
+            doc.data().sourceMessageId !== replyToMessageId) return;
         batch.update(doc.ref, {
           status: "resolved",
           resolvedAt: now,

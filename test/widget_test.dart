@@ -8,10 +8,15 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:tubitak/main.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tubitak/services/privacy_consent.dart';
 
 void main() {
   testWidgets('Login screen shows role choices', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({'data_consent_$privacyVersion': true});
     await tester.pumpWidget(const MyApp());
+    await tester.pump();
+    await tester.pump();
 
     expect(find.text('Anne'), findsOneWidget);
     expect(find.text('Üst Kuşak'), findsOneWidget);

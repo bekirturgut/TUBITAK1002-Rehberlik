@@ -1,3 +1,4 @@
+import 'privacy_page.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -55,6 +56,7 @@ class _AdminPageState extends State<AdminPage> {
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
+          const PrivacyButton(),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.redAccent),
             onPressed: _logout,

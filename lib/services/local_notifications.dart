@@ -25,7 +25,10 @@ class LocalNotifs {
     tz.setLocalLocation(tz.getLocation('Europe/Istanbul'));
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const initSettings = InitializationSettings(android: androidInit);
+    const initSettings = InitializationSettings(
+      android: androidInit,
+      iOS: DarwinInitializationSettings(),
+    );
 
     await _plugin.initialize(
       initSettings,
@@ -73,6 +76,7 @@ class LocalNotifs {
     if (when.isBefore(tz.TZDateTime.now(tz.local))) return;
 
     const details = NotificationDetails(
+      iOS: DarwinNotificationDetails(),
       android: AndroidNotificationDetails(
         channelId,
         channelName,
@@ -116,6 +120,7 @@ class LocalNotifs {
     required String body,
   }) async {
     const details = NotificationDetails(
+      iOS: DarwinNotificationDetails(),
       android: AndroidNotificationDetails(
         channelId,
         channelName,

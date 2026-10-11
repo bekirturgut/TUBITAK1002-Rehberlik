@@ -6,7 +6,7 @@ const backend=require("../../.legacy-emulator/index.js");const db=getFirestore()
 async function check(name,body){await body();passed++;console.log(`PASS: ${name}`)}
 async function call(name,data){
  for(let attempt=0;attempt<20;attempt++){
-  const r=await fetch(`http://127.0.0.1:5001/demo-rehberlik/europe-west1/${name}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data}),signal:AbortSignal.timeout(45000)});
+  const r=await fetch(`http://127.0.0.1:5001/demo-rehberlik/europe-west1/${name}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:name==="askFaqBot"?{...data,aiConsent:true,privacyVersion:"2026-10-10-v1"}:data}),signal:AbortSignal.timeout(45000)});
   const text=await r.text();let body;
   try{body=JSON.parse(text)}catch{if(attempt<19 && /Function|not found|not ready/i.test(text)){await new Promise(resolve=>setTimeout(resolve,2000));continue}throw new Error(`Callable emulator not ready: HTTP ${r.status}`)}
   assert.equal(r.status,200,JSON.stringify(body));return body.result;
@@ -15,6 +15,10 @@ async function call(name,data){
 
 async function waitFor(read,predicate){for(let i=0;i<45;i++){const result=await read();if(predicate(result))return result;await new Promise(r=>setTimeout(r,1000))}throw new Error("Trigger did not finish");}
 async function main(){
+ await check("AI requests without consent are rejected before processing",async()=>{
+  await assert.rejects(()=>backend.askFaqBot.run({data:{question:"İzinsiz soru"}}),/izin gerekiyor/);
+  await assert.rejects(()=>backend.askFaqBot.run({data:{question:"Eski izin",aiConsent:true,privacyVersion:"old"}}),/izin gerekiyor/);
+ });
  await check("Unauthenticated Firestore reads used by legacy login",async()=>{
   const r=await fetch("http://127.0.0.1:8080/v1/projects/demo-rehberlik/databases/(default)/documents/users/mother");assert.equal(r.status,200);const data=await r.json();assert.equal(data.fields.password.stringValue,"test-password");
  });
@@ -28,8 +32,29 @@ async function main(){
  await check("Expert reply resolves only the referenced original question",async()=>{await db.doc("chats/mother/messages/smoke-reply").set({text:"Uzman test yanıtı",senderType:"admin",senderRole:"Admin",senderId:"mother",replyToMessageId:"smoke-question",replyToText:"Yardım istiyorum",createdAt:Timestamp.now()});await waitFor(()=>db.doc("chats/mother/messages/smoke-question").get(),s=>s.data()?.isAnswered===true);await waitFor(()=>db.doc("admin_alerts/mother_smoke-question").get(),s=>s.data()?.status==="resolved");await waitFor(()=>db.doc("chats/mother").get(),s=>s.data()?.hasPendingAdminReply===false)});
  await check("Legacy FAQ matching and answer feedback contract",async()=>{await db.doc("faq_items/smoke-faq").set({question:"Destek?",answer:"Test bilgi tabanı yanıtı",isActive:true,embedding:[1,0,0]});const result=await call("askFaqBot",{question:"Destek?",userId:"mother",sourceMessageId:"feedback-question"});assert.equal(result.escalated,false);assert.equal(result.needsFeedback,true);assert.equal(result.answer,"Test bilgi tabanı yanıtı");await waitFor(()=>db.doc("faq_items/smoke-faq").get(),s=>s.data()?.embeddingModel==="gemini-embedding-001");await db.doc("faq_items/smoke-faq").delete()});
  await check("Original manual escalation accepts the legacy payload",async()=>{await db.doc("chats/mother/messages/feedback-question").set({text:"Destek?",senderType:"user",isAnswered:false,createdAt:Timestamp.now()});const result=await call("escalateChatToAdmin",{question:"Destek?",userId:"mother",sourceMessageId:"feedback-question",score:0.5});assert.equal((await db.doc("chats/mother/messages/feedback-question").get()).data().needsAdminReply,true)});
+ await check("AI outage still returns a response and forwards the existing question",async()=>{
+  await db.doc("faq_items/outage-faq").set({question:"Başka bir konu",answer:"Bilgi tabanı cevabı",isActive:true,embedding:[1,0,0]});
+  await db.doc("chats/mother/messages/outage-question").set({text:"AI arızası testi",senderType:"user",needsAdminReply:false,isAnswered:false,createdAt:Timestamp.now()});
+  const result=await call("askFaqBot",{question:"AI arızası testi",userId:"mother",sourceMessageId:"outage-question"});
+  assert.equal(result.escalated,true);assert.match(result.answer,/uzman desteğine/);
+  assert.equal((await db.doc("chats/mother/messages/outage-question").get()).data().needsAdminReply,true);
+  await db.doc("faq_items/outage-faq").delete();
+ });
+ await check("Answered questions cannot be reopened by late feedback",async()=>{
+  await call("escalateChatToAdmin",{question:"Yardım istiyorum",userId:"mother",sourceMessageId:"smoke-question"});
+  assert.equal((await db.doc("chats/mother/messages/smoke-question").get()).data().isAnswered,true);
+  assert.equal((await db.doc("admin_alerts/mother_smoke-question").get()).data().status,"resolved");
+ });
+ await check("Missing source message never creates a phantom pending question",async()=>{
+  await assert.rejects(()=>backend.escalateChatToAdmin.run({data:{userId:"mother",question:"Silinmiş",sourceMessageId:"deleted-question"}}),/bulunamadı/);
+  assert.equal((await db.doc("chats/mother/messages/deleted-question").get()).exists,false);
+ });
  await check("FCM token remains on users and queue keeps uid_templateId IDs",async()=>{await db.doc("users/mother").update({fcmToken:"demo-fcm-token",fcmUpdatedAt:FieldValue.serverTimestamp()});await db.doc("notifications/smoke-template").set({title:"Test",body:"Test body",targetRole:"Anne",isActive:true,delayDays:30});await waitFor(()=>db.doc("sendQueue/mother_smoke-template").get(),s=>s.exists);assert.equal((await db.doc("sendQueue/mother_smoke-template").get()).data().token,"demo-fcm-token");assert.equal((await db.doc("sendQueue/template_mother_smoke-template").get()).exists,false)});
- await check("Original scheduler sends due queue records without native registry",async()=>{await db.doc("sendQueue/mother_smoke-template").update({dueAt:Timestamp.fromMillis(Date.now()-1000)});await backend.sendDueNotifications.run({});assert.equal((await db.doc("sendQueue/mother_smoke-template").get()).data().sent,true)});
+ await check("Original scheduler sends due queue records without native registry",async()=>{const queue=db.doc("sendQueue/mother_scheduler-smoke");
+  const original=(await db.doc("sendQueue/mother_smoke-template").get()).data();
+  // Isolate the scheduler fixture from concurrent template/token triggers.
+  await queue.set({...original,templateId:"scheduler-smoke",sent:false,dueAt:Timestamp.fromMillis(Date.now()-1000)});
+  await backend.sendDueNotifications.run({});assert.equal((await queue.get()).data().sent,true)});
  console.log(`${passed} legacy integration checks passed.`)
 }
 main().catch(e=>{console.error(e.message);process.exitCode=1});

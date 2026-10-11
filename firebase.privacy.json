@@ -1,0 +1,10 @@
+{
+  "hosting": {
+    "public": "privacy-site",
+    "ignore": [
+      "firebase.privacy.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  }
+}

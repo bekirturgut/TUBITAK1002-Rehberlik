@@ -1,3 +1,4 @@
+import 'privacy_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -50,6 +51,7 @@ class _MotherPageState extends State<MotherPage> {
           child: SingleChildScrollView(
             child: Column(
               children: [
+                PrivacyButton(userId: widget.userId.toString()),
                 EntranceAnimation(child: _buildTopGreetingFromFirestore()),
                 EntranceAnimation(
                   delay: const Duration(milliseconds: 80),
