@@ -7,7 +7,7 @@ class LocalNotifs {
   static final instance = LocalNotifs._();
 
   final FlutterLocalNotificationsPlugin _plugin =
-  FlutterLocalNotificationsPlugin();
+      FlutterLocalNotificationsPlugin();
 
   static const String channelId = "scheduled_notifications";
   static const String channelName = "Zamanlı Bildirimler";
@@ -27,7 +27,11 @@ class LocalNotifs {
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const initSettings = InitializationSettings(
       android: androidInit,
-      iOS: DarwinInitializationSettings(),
+      iOS: DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      ),
     );
 
     await _plugin.initialize(
@@ -45,13 +49,16 @@ class LocalNotifs {
 
     await _plugin
         .resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>()
+          AndroidFlutterLocalNotificationsPlugin
+        >()
         ?.createNotificationChannel(androidChannel);
   }
 
   Future<void> requestPermissionAndroid13Plus() async {
-    final android = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
+    final android = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     if (android == null) return;
 
     final enabled = await android.areNotificationsEnabled() ?? true;
@@ -64,7 +71,8 @@ class LocalNotifs {
       s.codeUnits.fold<int>(0, (p, e) => (p * 31 + e) & 0x7fffffff);
 
   /// stable id: uid + templateId
-  int makeStableId(String uid, String templateId) => _idFrom("$uid-$templateId");
+  int makeStableId(String uid, String templateId) =>
+      _idFrom("$uid-$templateId");
 
   Future<void> schedule({
     required int id,
@@ -96,7 +104,7 @@ class LocalNotifs {
         details,
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
-        UILocalNotificationDateInterpretation.absoluteTime,
+            UILocalNotificationDateInterpretation.absoluteTime,
       );
       return;
     } catch (_) {}
@@ -109,7 +117,7 @@ class LocalNotifs {
       details,
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
-      UILocalNotificationDateInterpretation.absoluteTime,
+          UILocalNotificationDateInterpretation.absoluteTime,
     );
   }
 

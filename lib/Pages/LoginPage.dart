@@ -1,4 +1,6 @@
 import 'privacy_page.dart';
+import '../services/secure_session.dart';
+import '../widgets/app_brand.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:tubitak/Pages/AdminPage.dart';
@@ -109,6 +111,7 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     try {
+      if (!mounted) return;
       await NotificationBootstrap.sync(context: context, uid: uid);
     } catch (e) {
       debugPrint("Notification bootstrap error: $e");
@@ -117,23 +120,16 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _autoLoginIfRemembered() async {
     final prefs = await SharedPreferences.getInstance();
-    final savedUid = prefs.getString('uid');
-    final savedRole = prefs.getString('role');
-    final isRemembered = prefs.getBool('rememberMe') ?? false;
-
-    if (!mounted) return;
-
-    if (isRemembered && savedUid != null && savedRole != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (!mounted) return;
-
-        try {
-          await _writeLoginHistory(savedUid);
-        } catch (_) {}
-
-        _goRolePage(savedRole, savedUid);
-      });
+    if (prefs.getBool('rememberMe') != true) {
+      await SecureSession.signOut();
+      return;
     }
+    final profile = await SecureSession.restoredProfile();
+    if (profile == null || !mounted) return;
+    try {
+      await _writeLoginHistory(profile.userId);
+    } catch (_) {}
+    if (mounted) _goRolePage(profile.role, profile.userId);
   }
 
   Future<void> _login() async {
@@ -152,35 +148,13 @@ class _LoginPageState extends State<LoginPage> {
     _setLoading(true);
 
     try {
-      final query = await FirebaseFirestore.instance
-          .collection("users")
-          .where("phone", isEqualTo: phone)
-          .limit(1)
-          .get();
-
-      if (query.docs.isEmpty) {
-        _showError("Kullanıcı bulunamadı");
-        _setLoading(false);
-        return;
-      }
-
-      final doc = query.docs.first;
-      final data = doc.data();
-
-      if (data["password"] != password) {
-        _showError("Şifre yanlış");
-        _setLoading(false);
-        return;
-      }
-
-      if (data["role"] != selectedRole) {
-        _showError("Bu rolde bu kullanıcı yok");
-        _setLoading(false);
-        return;
-      }
-
-      final uid = doc.id;
-      final role = (data["role"] ?? "").toString();
+      final profile = await SecureSession.signIn(
+        phone: phone,
+        password: password,
+        selectedRole: selectedRole!,
+      );
+      final uid = profile.userId;
+      final role = profile.role;
 
       final prefs = await SharedPreferences.getInstance();
       if (rememberMe) {
@@ -444,6 +418,8 @@ class _LoginPageState extends State<LoginPage> {
   Widget _buildWelcomeText() {
     return const Column(
       children: [
+        AppBrand(),
+        SizedBox(height: 18),
         Text(
           "Hoş geldiniz 🌸",
           style: TextStyle(
@@ -465,7 +441,7 @@ class _LoginPageState extends State<LoginPage> {
     return const Padding(
       padding: EdgeInsets.symmetric(horizontal: 40),
       child: Text(
-        "Verilen bilgiler gizli tutulacak ve yalnızca bilimsel amaçlar için kullanılacaktır.",
+        "Bilgileriniz eğitim ve destek hizmetleri için gizlilik politikası doğrultusunda işlenir.",
         textAlign: TextAlign.center,
         style: TextStyle(color: Colors.blueGrey, fontSize: 12),
       ),

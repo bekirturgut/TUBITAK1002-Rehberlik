@@ -36,7 +36,7 @@ class _PrivacyGateState extends State<PrivacyGate> {
           const Icon(Icons.privacy_tip_outlined, size: 48),
           const SizedBox(height: 20),
           const Text(
-            'Uygulama; kullanıcı kaydınızı, giriş geçmişinizi, eğitim ilerlemenizi ve sohbetlerinizi rehberlik/eğitim ve destek için Firebase üzerinden işler. Yetkili araştırma yöneticileri bu kayıtlara erişebilir. Gemini’ye soru gönderimi için ayrıca izin sorulur. Bu izin araştırmaya katılım onamınızın yerine geçmez.',
+            'Uygulama; kullanıcı kaydınızı, giriş geçmişinizi, eğitim ilerlemenizi ve sohbetlerinizi rehberlik/eğitim ve destek için Firebase üzerinden işler. Yetkili uygulama yöneticileri bu kayıtlara erişebilir. Gemini’ye soru gönderimi için ayrıca izin sorulur.',
           ),
           const SizedBox(height: 16),
           const PrivacyButton(),

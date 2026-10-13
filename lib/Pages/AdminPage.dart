@@ -1,6 +1,7 @@
 import 'privacy_page.dart';
+import 'ReviewRequestsPage.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import '../services/secure_session.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tubitak/Pages/ChatbotTab.dart';
 import 'package:tubitak/Pages/SSSTab.dart';
@@ -29,14 +30,14 @@ class _AdminPageState extends State<AdminPage> {
   ];
 
   Future<void> _logout() async {
-    await FirebaseAuth.instance.signOut();
+    await SecureSession.signOut();
     if (!mounted) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear(); // ya da sadece uid/role/rememberMe sil
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const LoginPage()),
-          (route) => false,
+      (route) => false,
     );
   }
 
@@ -56,11 +57,19 @@ class _AdminPageState extends State<AdminPage> {
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
+          IconButton(
+            tooltip: 'İçerik bildirimleri ve silme talepleri',
+            icon: const Icon(Icons.flag_outlined),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ReviewRequestsPage()),
+            ),
+          ),
           const PrivacyButton(),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.redAccent),
             onPressed: _logout,
-          )
+          ),
         ],
       ),
 
@@ -79,7 +88,7 @@ class _AdminPageState extends State<AdminPage> {
                 blurRadius: 10,
                 offset: Offset(0, -2),
                 color: Colors.black12,
-              )
+              ),
             ],
           ),
           child: BottomNavigationBar(
@@ -100,10 +109,7 @@ class _AdminPageState extends State<AdminPage> {
                 icon: Icon(Icons.extension),
                 label: "Oyun Kartları",
               ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.quiz),
-                label: "SSS",
-              ),
+              BottomNavigationBarItem(icon: Icon(Icons.quiz), label: "SSS"),
               BottomNavigationBarItem(
                 icon: Icon(Icons.smart_toy),
                 label: "Chatbot",

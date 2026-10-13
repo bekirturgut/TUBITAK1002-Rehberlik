@@ -7,6 +7,7 @@ import 'package:tubitak/services/local_notifications.dart';
 import 'package:tubitak/widgets/app_animations.dart';
 import 'firebase_options.dart';
 import 'widgets/privacy_gate.dart';
+import 'widgets/app_brand.dart';
 
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
@@ -49,7 +50,7 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Tubitak',
+      title: appName,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,

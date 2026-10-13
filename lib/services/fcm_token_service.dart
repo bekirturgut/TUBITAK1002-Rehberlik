@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -5,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class FcmTokenService {
   FcmTokenService._();
+  static StreamSubscription<String>? _refreshSubscription;
 
   static const String _prefsKeyLastToken = "last_fcm_token";
   static const String _prefsKeyLastUid = "last_fcm_uid";
@@ -15,20 +18,25 @@ class FcmTokenService {
   /// - Token refresh olursa otomatik yazar
   static Future<void> syncIfNeeded(String uid) async {
     try {
+      if (FirebaseAuth.instance.currentUser?.uid != uid) return;
       final prefs = await SharedPreferences.getInstance();
 
       final messaging = FirebaseMessaging.instance;
 
       //Android 13+ / iOS izin
-      await messaging.requestPermission(
+      final permission = await messaging.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
+      if (permission.authorizationStatus != AuthorizationStatus.authorized &&
+          permission.authorizationStatus != AuthorizationStatus.provisional) {
+        return;
+      }
+      await messaging.setAutoInitEnabled(true);
 
       //Token al
       final token = await messaging.getToken();
-      debugPrint("FCM getToken: $token");
 
       if (token == null || token.isEmpty) return;
 
@@ -46,9 +54,15 @@ class FcmTokenService {
       }
 
       //Token yenilenirse otomatik güncelle (değiştiyse)
-      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+      await _refreshSubscription?.cancel();
+      _refreshSubscription = FirebaseMessaging.instance.onTokenRefresh.listen((
+        newToken,
+      ) async {
         try {
-          if (newToken.isEmpty) return;
+          if (newToken.isEmpty ||
+              FirebaseAuth.instance.currentUser?.uid != uid) {
+            return;
+          }
 
           final last = prefs.getString(_prefsKeyLastToken);
           final lastU = prefs.getString(_prefsKeyLastUid);
@@ -76,11 +90,30 @@ class FcmTokenService {
     required String uid,
     required String token,
   }) async {
+    if (FirebaseAuth.instance.currentUser?.uid != uid) return;
     final userRef = FirebaseFirestore.instance.collection("users").doc(uid);
 
-    await userRef.set({
+    await userRef.update({
       "fcmToken": token,
       "fcmUpdatedAt": FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    });
+  }
+
+  static Future<void> stop() async {
+    await _refreshSubscription?.cancel();
+    _refreshSubscription = null;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      try {
+        await FirebaseFirestore.instance.collection('users').doc(uid).update({
+          'fcmToken': FieldValue.delete(),
+          'fcmUpdatedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
+    }
+    try {
+      await FirebaseMessaging.instance.setAutoInitEnabled(false);
+      await FirebaseMessaging.instance.deleteToken();
+    } catch (_) {}
   }
 }

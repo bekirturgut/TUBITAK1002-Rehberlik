@@ -1,5 +1,6 @@
 import 'privacy_page.dart';
 import '../services/privacy_consent.dart';
+import '../services/user_requests.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
@@ -52,9 +53,57 @@ class _ChatPageState extends State<ChatPage> {
 
   bool get _isAdminView => widget.selectedRole == "Admin";
 
+  Future<void> _reportContent(String messageId) async {
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        title: const Text('Yanıtı bildir'),
+        children: [
+          for (final reason in [
+            'Zararlı veya yanlış sağlık bilgisi',
+            'Uygunsuz içerik',
+            'Kişisel bilgi veya gizlilik sorunu',
+            'Diğer',
+          ])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(c, reason),
+              child: Text(reason),
+            ),
+        ],
+      ),
+    );
+    if (reason == null) return;
+    try {
+      await UserRequests.reportContent(
+        userId: widget.userId,
+        messageId: messageId,
+        reason: reason,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('İçerik bildiriminiz inceleme için kaydedildi.'),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bildirim kaydedilemedi. Lütfen tekrar deneyin.'),
+        ),
+      );
+    }
+  }
+
   Future<void> _sendMessage() async {
     final text = _msgCtrl.text.trim();
     if (text.isEmpty || _sending) return;
+    if (text.length > 4000) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Mesaj en fazla 4000 karakter olabilir.')),
+      );
+      return;
+    }
 
     if (!_isAdminView && !await ensureAiConsent(context, widget.userId)) return;
     if (!mounted) return;
@@ -121,27 +170,8 @@ class _ChatPageState extends State<ChatPage> {
       final resultData = Map<String, dynamic>.from(result.data as Map);
       final botAnswer = (resultData["answer"] ?? "").toString().trim();
       if (botAnswer.isEmpty) throw StateError('Boş chatbot cevabı');
-      final score = (resultData["score"] ?? 0).toDouble();
-      final needsFeedback = resultData["needsFeedback"] == true;
-      final escalated = resultData["escalated"] == true;
 
-      await _chatRef.collection("messages").doc("bot_$sourceMessageId").set({
-        "text": botAnswer,
-        "senderType": "bot",
-        "senderId": "chatbot",
-        "createdAt": FieldValue.serverTimestamp(),
-        "relatedQuestion": text,
-        "sourceMessageId": sourceMessageId,
-        "score": score,
-        "needsFeedback": needsFeedback,
-        "showFeedbackButtons": needsFeedback,
-        "feedbackGiven": false,
-        "isSufficient": null,
-        "escalated": escalated,
-      });
-      await _chatRef.collection('messages').doc(sourceMessageId).update({
-        'botRequestStatus': 'answered',
-      });
+      // Bot answers are written by the authenticated backend; clients cannot forge AI messages.
     } catch (e) {
       debugPrint("Bot error: $e");
       try {
@@ -655,6 +685,14 @@ class _ChatPageState extends State<ChatPage> {
         child: Column(
           children: [
             _buildHeader(_isAdminView),
+            if (!_isAdminView)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: Text(
+                  'LactiGen tıbbi cihaz değildir. AI yanıtları hatalı olabilir; tanı veya tedavinin yerine geçmez. Sağlık kararlarınız için sağlık profesyoneline başvurun.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
             Expanded(
               child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                 stream: _messagesStream,
@@ -982,6 +1020,13 @@ class _ChatPageState extends State<ChatPage> {
             message: message,
             data: data,
           ),
+
+          if (isBot && !isAdminView)
+            TextButton.icon(
+              icon: const Icon(Icons.flag_outlined, size: 18),
+              label: const Text('Uygunsuz veya hatalı yanıtı bildir'),
+              onPressed: () => _reportContent(messageId),
+            ),
 
           if (isBot && widget.selectedRole != "Admin" && needsFeedback) ...[
             const SizedBox(height: 8),

@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function active() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('deletionInProgress', false) != true;
+    }
+    function admin() { return active() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin'; }
+    function owner(uid) { return active() && request.auth.uid == uid; }
+    match /users/{uid} {
+      allow read: if admin() || owner(uid);
+      allow create, delete: if false;
+      allow update: if owner(uid) && request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['fcmToken', 'fcmUpdatedAt', 'quizStats']);
+      match /{collection}/{id} {
+        allow read: if admin() || owner(uid);
+        allow write: if owner(uid) && collection in ['correctCards', 'wrongCards', 'loginHistory', 'scheduledNotifs'];
+      }
+    }
+    match /sss/{id} { allow read: if true; allow write: if admin(); }
+    match /faq_items/{id} { allow read: if active(); allow write: if admin(); }
+    match /MotherLearnCard/{id} { allow read: if active(); allow write: if admin(); }
+    match /UpperLearnCard/{id} { allow read: if active(); allow write: if admin(); }
+    match /notifications/{id} { allow read: if active(); allow write: if admin(); }
+    match /chats/{uid} {
+      allow read: if admin() || owner(uid);
+      allow create: if admin() || (owner(uid) && request.resource.data.userId == uid
+        && request.resource.data.keys().hasOnly(['userId', 'createdAt', 'updatedAt']));
+      allow update: if admin() || (owner(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userId', 'createdAt', 'updatedAt']));
+      allow delete: if false;
+      match /messages/{id} {
+        allow read: if admin() || owner(uid);
+        allow create: if admin() || (owner(uid) && request.resource.data.senderType == 'user'
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.senderRole == get(/databases/$(database)/documents/users/$(uid)).data.role
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 4000
+          && request.resource.data.keys().hasOnly(['text', 'senderType', 'senderRole', 'senderId', 'createdAt', 'needsAdminReply', 'isAnswered'])
+          && request.resource.data.needsAdminReply == false && request.resource.data.isAnswered == false);
+        allow update: if admin() || (owner(uid) && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['feedbackGiven', 'isSufficient', 'showFeedbackButtons', 'feedbackAt', 'botRequestStatus']));
+        allow delete: if false;
+      }
+    }
+    match /content_reports/{id} {
+      allow get: if active() && !exists(/databases/$(database)/documents/content_reports/$(id));
+      allow read: if admin() || (active() && resource.data.userId == request.auth.uid);
+      allow create: if active() && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'pending' && request.resource.data.reason is string
+        && request.resource.data.reason.size() <= 200
+        && request.resource.data.keys().hasOnly(['userId', 'messageId', 'reason', 'status', 'createdAt'])
+        && exists(/databases/$(database)/documents/chats/$(request.auth.uid)/messages/$(request.resource.data.messageId));
+      allow update: if admin();
+      allow delete: if false;
+    }
+    match /deletion_requests/{uid} {
+      allow read: if admin() || owner(uid);
+      allow create: if owner(uid) && request.resource.data.userId == uid && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasOnly(['userId', 'status', 'createdAt']);
+      allow update: if admin();
+      allow delete: if false;
+    }
+    match /admin_alerts/{id} { allow read: if admin(); allow write: if false; }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

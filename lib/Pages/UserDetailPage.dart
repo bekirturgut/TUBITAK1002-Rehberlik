@@ -1,3 +1,4 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:tubitak/Pages/AdminPage.dart';
@@ -33,7 +34,9 @@ class _UserDetailPageState extends State<UserDetailPage> {
   void initState() {
     super.initState();
     _nameCtrl = TextEditingController(text: widget.userData["name"] ?? "");
-    _surnameCtrl = TextEditingController(text: widget.userData["surname"] ?? "");
+    _surnameCtrl = TextEditingController(
+      text: widget.userData["surname"] ?? "",
+    );
     _phoneCtrl = TextEditingController(text: widget.userData["phone"] ?? "");
     _passwordCtrl = TextEditingController();
     _selectedRole = widget.userData["role"];
@@ -57,27 +60,27 @@ class _UserDetailPageState extends State<UserDetailPage> {
 
     setState(() => _isSaving = true);
     final normalizedPhone = _normalizePhone(_phoneCtrl.text.trim());
-    final data = {
-      "name": _nameCtrl.text.trim(),
-      "surname": _surnameCtrl.text.trim(),
-      "phone": normalizedPhone,
-      "role": _selectedRole,
-      "updatedAt": FieldValue.serverTimestamp(),
-    };
-
-    if (_passwordCtrl.text.trim().isNotEmpty) {
-      data["password"] = _passwordCtrl.text.trim();
-    }
-
-    final ref = FirebaseFirestore.instance.collection("users");
-
-    if (widget.isCreate) {
-      data["createdAt"] = FieldValue.serverTimestamp();
-      await ref.add(data);
-      _snack("Kullanıcı eklendi");
-    } else {
-      await ref.doc(widget.userId).update(data);
-      _snack("Kullanıcı güncellendi");
+    try {
+      await FirebaseFunctions.instanceFor(
+        region: 'europe-west1',
+      ).httpsCallable('saveManagedUser').call({
+        'userId': widget.isCreate ? null : widget.userId,
+        'name': _nameCtrl.text.trim(),
+        'surname': _surnameCtrl.text.trim(),
+        'phone': normalizedPhone,
+        'role': _selectedRole,
+        'password': _passwordCtrl.text.trim(),
+      });
+      if (!mounted) return;
+      _snack(widget.isCreate ? 'Kullanıcı eklendi' : 'Kullanıcı güncellendi');
+    } on FirebaseFunctionsException catch (e) {
+      if (mounted) _snack(e.message ?? 'Hesap kaydedilemedi.');
+      return;
+    } catch (_) {
+      if (mounted) _snack('Hesap kaydedilemedi. Lütfen tekrar deneyin.');
+      return;
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
 
     if (!mounted) return;
@@ -85,8 +88,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
   }
 
   void _snack(String msg) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
@@ -154,7 +156,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
             color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 15,
             offset: const Offset(0, 6),
-          )
+          ),
         ],
       ),
       child: Column(
@@ -163,15 +165,17 @@ class _UserDetailPageState extends State<UserDetailPage> {
           const SizedBox(height: 14),
           _modernField(_surnameCtrl, "Soyisim", Icons.badge),
           const SizedBox(height: 14),
-          _modernField(_phoneCtrl, "Telefon", Icons.phone,
-              keyboard: TextInputType.phone),
+          _modernField(
+            _phoneCtrl,
+            "Telefon",
+            Icons.phone,
+            keyboard: TextInputType.phone,
+          ),
           const SizedBox(height: 14),
 
           _modernField(
             _passwordCtrl,
-            widget.isCreate
-                ? "Şifre"
-                : "Yeni Şifre (opsiyonel)",
+            widget.isCreate ? "Şifre" : "Yeni Şifre (opsiyonel)",
             Icons.lock,
             obscure: true,
           ),
@@ -213,12 +217,12 @@ class _UserDetailPageState extends State<UserDetailPage> {
   }
 
   Widget _modernField(
-      TextEditingController ctrl,
-      String hint,
-      IconData icon, {
-        TextInputType keyboard = TextInputType.text,
-        bool obscure = false,
-      }) {
+    TextEditingController ctrl,
+    String hint,
+    IconData icon, {
+    TextInputType keyboard = TextInputType.text,
+    bool obscure = false,
+  }) {
     return TextField(
       controller: ctrl,
       keyboardType: keyboard,
@@ -252,10 +256,12 @@ class _UserDetailPageState extends State<UserDetailPage> {
         child: _isSaving
             ? const CircularProgressIndicator(color: Colors.white)
             : Text(
-          widget.isCreate ? "KULLANICI EKLE" : "GÜNCELLE",
-          style: const TextStyle(
-              fontSize: 16, fontWeight: FontWeight.bold),
-        ),
+                widget.isCreate ? "KULLANICI EKLE" : "GÜNCELLE",
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
       ),
     );
   }
@@ -268,7 +274,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
           Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(builder: (_) => const AdminPage()),
-                (route) => false,
+            (route) => false,
           );
         },
         style: ElevatedButton.styleFrom(
@@ -285,6 +291,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
       ),
     );
   }
+
   Widget _buildMetaInfo() {
     final created = widget.userData["createdAt"];
     final updated = widget.userData["updatedAt"];
@@ -324,6 +331,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
       ),
     );
   }
+
   String _normalizePhone(String input) {
     String phone = input.replaceAll(RegExp(r'\s+'), '');
 
@@ -347,7 +355,6 @@ class _UserDetailPageState extends State<UserDetailPage> {
 
     return '+90$phone'; // fallback
   }
-
 
   //DATE FORMAT
   String _formatDate(dynamic ts) {

@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'fcm_token_service.dart';
 
 import 'local_notifications.dart';
 
@@ -17,7 +17,7 @@ class NotificationBootstrap {
     await LocalNotifs.instance.requestPermissionAndroid13Plus();
 
     //Push için token senkronla (uygulama kapalıyken push gelebilmesi için şart)
-    await _syncFcmToken(uid);
+    await FcmTokenService.syncIfNeeded(uid);
 
     final userRef = FirebaseFirestore.instance.collection("users").doc(uid);
     final userDoc = await userRef.get();
@@ -89,46 +89,6 @@ class NotificationBootstrap {
         "localId": localId,
         "skippedBecausePast": false,
       });
-    }
-  }
-
-  ///FCM token alır ve users/{uid} içine yazar.
-  ///Push bildirim göndereceksen şart.
-  static Future<void> _syncFcmToken(String uid) async {
-    try {
-      debugPrint("_syncFcmToken başladı uid=$uid");
-
-      final messaging = FirebaseMessaging.instance;
-
-      final perm = await messaging.requestPermission(alert: true, badge: true, sound: true);
-      debugPrint("permission: ${perm.authorizationStatus}");
-
-      final token = await messaging.getToken();
-      debugPrint("FCM TOKEN: $token");
-
-      if (token == null) {
-        debugPrint("TOKEN NULL -> cihaz/emülatör/Google Play Services sorunu olabilir");
-        return;
-      }
-
-      final userRef = FirebaseFirestore.instance.collection("users").doc(uid);
-
-      await userRef.set({
-        "fcmToken": token,
-        "fcmUpdatedAt": FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      debugPrint("Firestore'a token yazıldı");
-
-      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-        debugPrint("Token refresh: $newToken");
-        await userRef.set({
-          "fcmToken": newToken,
-          "fcmUpdatedAt": FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      });
-    } catch (e) {
-      debugPrint("FCM token sync error: $e");
     }
   }
 }

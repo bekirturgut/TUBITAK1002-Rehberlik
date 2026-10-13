@@ -1,4 +1,6 @@
 import 'privacy_page.dart';
+import '../services/secure_session.dart';
+import '../widgets/app_brand.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -149,8 +151,10 @@ class _UpperPageState extends State<UpperPage> {
   Widget _buildLogoutButton(BuildContext context) {
     return InkWell(
       onTap: () async {
+        await SecureSession.signOut();
         final prefs = await SharedPreferences.getInstance();
         await prefs.clear(); // ya da sadece uid/role/rememberMe sil
+        if (!context.mounted) return;
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (_) => const LoginPage()),
@@ -277,6 +281,8 @@ class _UpperPageState extends State<UpperPage> {
   Widget _buildWelcomeSection() {
     return Column(
       children: [
+        const AppBrand(),
+        const SizedBox(height: 18),
         const Text(
           "Hoş geldiniz 🌸",
           style: TextStyle(

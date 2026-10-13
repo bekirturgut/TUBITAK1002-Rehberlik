@@ -36,8 +36,8 @@ struct LoginView:View {
                 Section {
                     VStack(spacing:12) {
                         Image(systemName:"heart.circle.fill").font(.system(size:64)).foregroundStyle(.pink)
-                        Text("Rehberlik").font(.largeTitle.bold())
-                        Text("Öğren, danış, birlikte güçlen.").foregroundStyle(.secondary)
+                        Text("LactiGen").font(.largeTitle.bold())
+                        Text("Akıllı Emzirme Asistanı").foregroundStyle(.secondary)
                     }.frame(maxWidth:.infinity).padding()
                 }
                 Section("Giriş") {
@@ -81,7 +81,7 @@ struct HomeView:View {
                     NavigationLink(destination:BadgesView()){Label("Rozetlerim",systemImage:"medal")}
                 }
                 Button("Çıkış yap",role:.destructive){logoutConfirmation=true}.accessibilityIdentifier("logout")
-            }.navigationTitle("Rehberlik")
+            }.navigationTitle("LactiGen")
             .confirmationDialog("Oturum kapatılsın mı?",isPresented:$logoutConfirmation,titleVisibility:.visible){Button("Çıkış yap",role:.destructive){Task{await store.logout()}}}
         }
     }

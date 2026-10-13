@@ -1,3 +1,4 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../constants.dart';
@@ -29,31 +30,12 @@ class _UsersTabState extends State<UsersTab> {
   }
 
   Future<void> _deleteUserCascade(String userId) async {
-    final userRef = FirebaseFirestore.instance.collection('users').doc(userId);
-
-    await _deleteSubcollection(userRef.collection('notifications'));
-    await _deleteSubcollection(userRef.collection('loginHistory'));
-    await _deleteSubcollection(userRef.collection('scheduledNotifs'));
-
-    await userRef.delete();
-  }
-
-  Future<void> _deleteSubcollection(CollectionReference colRef) async {
-    const int batchSize = 200;
-
-    while (true) {
-      final snapshot = await colRef.limit(batchSize).get();
-
-      if (snapshot.docs.isEmpty) break;
-
-      final batch = FirebaseFirestore.instance.batch();
-
-      for (final doc in snapshot.docs) {
-        batch.delete(doc.reference);
-      }
-
-      await batch.commit();
-    }
+    await FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable(
+          'deleteManagedUser',
+          options: HttpsCallableOptions(timeout: const Duration(minutes: 5)),
+        )
+        .call({'userId': userId});
   }
 
   Future<void> _confirmAndDeleteUser(String userId, String fullName) async {
@@ -63,7 +45,7 @@ class _UsersTabState extends State<UsersTab> {
         title: const Text("Kullanıcı silinsin mi?"),
         content: Text(
           "$fullName adlı kullanıcı silinecek.\n"
-          "Bildirimler ve giriş geçmişi de tamamen kaldırılacak.\n\n"
+          "Sohbetler, eğitim ilerlemesi, bildirimler ve giriş geçmişi de tamamen kaldırılacak.\n\n"
           "Bu işlem geri alınamaz.",
         ),
         actions: [

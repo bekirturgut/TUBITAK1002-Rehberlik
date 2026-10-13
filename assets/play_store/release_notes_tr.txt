@@ -1,0 +1,7 @@
+<tr-TR>
+LactiGen — Akıllı Emzirme Asistanı
+• Hesap girişi ve veri erişimi güvenliği geliştirildi.
+• Gizlilik politikası ve izin açıklamaları güncellendi.
+• Hesap ve veri silme talebi seçeneği eklendi.
+• Yapay zekâ yanıtlarını bildirme seçeneği eklendi.
+</tr-TR>

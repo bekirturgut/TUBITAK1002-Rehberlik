@@ -1,6 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-const privacyVersion = '2026-10-10-v1';
+const privacyVersion = '2026-10-13-v2';
 
 class PrivacyConsent {
   static String key(String userId) =>
